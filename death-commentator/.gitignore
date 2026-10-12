@@ -1,0 +1,7 @@
+/build*/
+*.geode
+*.dll
+*.so
+!/dist/*.geode
+__pycache__/
+/tests/comment_tests

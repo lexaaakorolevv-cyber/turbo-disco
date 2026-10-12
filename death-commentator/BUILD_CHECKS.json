@@ -1,0 +1,37 @@
+{
+  "name": "Death Commentator",
+  "version": "v1.0.0",
+  "geode": "5.11.1",
+  "geometry_dash": "2.2081",
+  "platforms": [
+    "Windows x64",
+    "Android arm64-v8a"
+  ],
+  "package": "dist/local.death_commentator.geode",
+  "package_bytes": 507762,
+  "sha256": "5a512a485da00ae0010f8ad69c7f6a1c9d82dd9839552adb8a6c7d5d1bfae973",
+  "checks": {
+    "engine_tests": "16/16 passed",
+    "windows_release_compile_link": "passed",
+    "android64_release_compile_link": "passed",
+    "zip_metadata_embedded_binary_hashes": "passed",
+    "font_glyph_coverage_and_rectangles": "passed",
+    "geode_entry_exports_and_architectures": "passed",
+    "in_game_execution": "not tested: Geometry Dash executable unavailable"
+  },
+  "phrases": {
+    "Russian": 69,
+    "English": 69
+  },
+  "font_glyphs": 470,
+  "archive_entries": [
+    ".geode_cache",
+    "about.md",
+    "local.death_commentator.android64.so",
+    "local.death_commentator.dll",
+    "mod.json",
+    "resources/local.death_commentator/comment-font.fnt",
+    "resources/local.death_commentator/comment-font.png",
+    "resources/local.death_commentator/font-license.txt"
+  ]
+}
