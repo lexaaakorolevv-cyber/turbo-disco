@@ -1,6 +1,6 @@
 {
   "name": "Death Commentator",
-  "version": "v1.0.0",
+  "version": "v1.1.0",
   "geode": "5.11.1",
   "geometry_dash": "2.2081",
   "platforms": [
@@ -8,23 +8,23 @@
     "Android arm64-v8a"
   ],
   "package": "dist/local.death_commentator.geode",
-  "package_bytes": 507762,
-  "sha256": "5a512a485da00ae0010f8ad69c7f6a1c9d82dd9839552adb8a6c7d5d1bfae973",
-  "checks": {
-    "engine_tests": "16/16 passed",
-    "windows_release_compile_link": "passed",
-    "android64_release_compile_link": "passed",
-    "zip_metadata_embedded_binary_hashes": "passed",
-    "font_glyph_coverage_and_rectangles": "passed",
-    "geode_entry_exports_and_architectures": "passed",
-    "in_game_execution": "not tested: Geometry Dash executable unavailable"
-  },
+  "package_bytes": 540015,
+  "sha256": "0fb1fcef6c6ffbd57d4c186a9aeda6a143121099dc9956ed88f082d8f6ad4ae8",
   "phrases": {
     "Russian": 69,
     "English": 69
   },
-  "font_glyphs": 470,
-  "archive_entries": [
+  "checks": {
+    "phrase_tests": "16/16 passed",
+    "death_cycle_regressions": "8/8 passed",
+    "windows_release_compile_link": "passed",
+    "android64_release_compile_link": "passed",
+    "archive_metadata_binary_equality": "passed",
+    "font_coverage": "passed",
+    "banner_phrase_geometry": "138 phrases at viewport widths 320 and 568 passed",
+    "in_game_execution": "not tested: Geometry Dash executable unavailable"
+  },
+  "entries": [
     ".geode_cache",
     "about.md",
     "local.death_commentator.android64.so",

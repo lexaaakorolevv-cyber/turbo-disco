@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(DeathCommentator VERSION 1.0.0 LANGUAGES CXX)
+project(DeathCommentator VERSION 1.1.0 LANGUAGES CXX)
 
 option(DEATH_COMMENTATOR_TESTS_ONLY "Build comment engine tests without Geode" OFF)
 if(DEATH_COMMENTATOR_TESTS_ONLY)
@@ -8,6 +8,10 @@ if(DEATH_COMMENTATOR_TESTS_ONLY)
     target_include_directories(comment_tests PRIVATE src)
     target_compile_features(comment_tests PRIVATE cxx_std_17)
     add_test(NAME death_comment_engine COMMAND comment_tests)
+    add_executable(death_cycle_tests tests/death_cycle_tests.cpp)
+    target_include_directories(death_cycle_tests PRIVATE src)
+    target_compile_features(death_cycle_tests PRIVATE cxx_std_17)
+    add_test(NAME death_cycle_regressions COMMAND death_cycle_tests)
     return()
 endif()
 

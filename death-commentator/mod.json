@@ -3,7 +3,7 @@
     "gd": {"win": "2.2081", "android": "2.2081"},
     "id": "local.death_commentator",
     "name": "Death Commentator",
-    "version": "v1.0.0",
+    "version": "v1.1.0",
     "developer": "Death Commentator",
     "description": "Choose kind encouragement, neutral comments, or roasts after a death. Russian and English phrases.",
     "resources": {
@@ -14,9 +14,9 @@
             "type": "bool", "name": "Enable comments", "default": true
         },
         "tone": {
-            "type": "string", "name": "Comment tone", "default": "Neutral",
+            "type": "string", "name": "Comment tone", "default": "Roast",
             "one-of": ["Kind", "Neutral", "Roast"],
-            "description": "Kind = encouragement, Neutral = calm observations, Roast = mock your fails. Also available in the in-game Comment menu."
+            "description": "Kind = encouragement, Neutral = calm observations, Roast = harsh insults with profanity. Choose a tone in Comments; messages appear on the game screen."
         },
         "language": {
             "type": "string", "name": "Phrase language", "default": "Russian",
@@ -28,19 +28,19 @@
             "description": "Frequency is counted within each level. The cooldown applies as well."
         },
         "cooldown": {
-            "type": "float", "name": "Minimum gap (seconds)", "default": 3.0,
+            "type": "float", "name": "Minimum gap (seconds)", "default": 0.0,
             "min": 0.0, "max": 30.0,
             "control": {"slider-step": 0.5},
             "description": "A skipped death is not queued. Set zero to comment on every eligible death."
         },
         "duration": {
-            "type": "float", "name": "Comment duration (seconds)", "default": 2.5,
+            "type": "float", "name": "Comment duration (seconds)", "default": 3.5,
             "min": 1.0, "max": 6.0,
             "control": {"slider-step": 0.5}
         },
         "position": {
-            "type": "string", "name": "Comment position", "default": "Top",
-            "one-of": ["Top", "Bottom"]
+            "type": "string", "name": "Comment position", "default": "Center",
+            "one-of": ["Center", "Top", "Bottom"]
         },
         "practice": {
             "type": "bool", "name": "Comments in practice", "default": true

@@ -5,3 +5,4 @@
 !/dist/*.geode
 __pycache__/
 /tests/comment_tests
+/tests/death_cycle_tests

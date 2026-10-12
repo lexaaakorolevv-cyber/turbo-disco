@@ -10,7 +10,7 @@ public:
 
 private:
     bool init() override;
-    void refresh(bool changePreview = true);
+    void refresh();
     void chooseKind(cocos2d::CCObject*);
     void chooseNeutral(cocos2d::CCObject*);
     void chooseRoast(cocos2d::CCObject*);
@@ -24,7 +24,6 @@ private:
 
     deathcomment::Engine m_previewEngine;
     cocos2d::CCLabelBMFont* m_modeLabel = nullptr;
-    cocos2d::CCLabelBMFont* m_previewLabel = nullptr;
     cocos2d::CCLabelBMFont* m_enabledLabel = nullptr;
     cocos2d::CCLabelBMFont* m_frequencyLabel = nullptr;
     cocos2d::CCLabelBMFont* m_cooldownLabel = nullptr;

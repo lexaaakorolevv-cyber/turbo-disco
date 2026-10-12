@@ -5,7 +5,8 @@
 
 namespace deathcomment {
 
-void showComment(cocos2d::CCNode* parent, std::string const& text,
+void showComment(std::string const& text,
                  Context const& context, Options const& config);
+void hideComment();
 
 } // namespace deathcomment
