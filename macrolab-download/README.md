@@ -1,13 +1,17 @@
-# Macro Lab 0.2.0 — Geode 5.11.1
+# Macro Lab v0.2.1 — исправление шрифта
 
-[Скачать .geode для Windows x64]( https://raw.githubusercontent.com/lexaaakorolevv-cyber/turbo-disco/b7301eee04f908c6c06cf402272ee30acc8ddc92/macrolab-download/local.macrolab-geode-5.11.1.geode )
+[Скачать готовый .geode для Geode 5.11.1](https://raw.githubusercontent.com/lexaaakorolevv-cyber/turbo-disco/c158386bea0bdeb4fe1ea9db00072d56afeebacd/macrolab-download/local.macrolab-geode-5.11.1.geode)
 
-Geometry Dash **2.2081**, Geode **5.11.1**. Замените старый файл Macro Lab в `geode/mods/`, чтобы не оставить два пакета с одинаковым ID.
+**Совместимость:** Windows x64, Geometry Dash 2.2081, Geode SDK/Loader 5.11.1.
 
-Перенесены реальные Popup/keyboard/processCommands API. Исправлены конечный checkpoint до release, очистка сессии и остановка F9 в паузе/модальных окнах. Добавлены три профиля поиска, независимые P2 hazards/gravity, более ранние варианты 24/48 steps и компактный HUD.
+Исправлено отображение текста на Windows: имена шрифта и PNG используют пространство ресурсов Geode и прямые слеши. Добавлена проверка ресурсов перед отрисовкой, новые имена файлов обходят старый кеш. Если шрифт отсутствует, мод показывает стандартное читаемое сообщение с инструкцией по восстановлению.
 
-Проверка: core CTest **4/4**, 81 core assertions, настоящий SDK API syntax **10/10**, Windows DLL и .geode успешно собраны и проверены: https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38444518575. Работа в самой игре здесь не проверялась; универсальное прохождение не обещается.
+Удалите старый пакет Macro Lab из `geode/mods/`, скопируйте новый файл и перезапустите игру. Сохранения макросов удалять не нужно.
 
-[Исходники и инструкции](MacroLab-geode-5.11.1-source.zip)
+Проверено: локальные и CI тесты 5/5, реальные API SDK 10/10, Windows DLL x64, ZIP CRC, версия пакета, точное соответствие шрифта исходникам, исправленные пути в DLL, HTTP 200 по прямой ссылке. [Успешная сборка](https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38455374010).
 
-SHA-256 пакета: `6c291168798395a362e727ca88e38b6cc0637e6671e7b095713aaf2497250e62`.
+Geometry Dash в этой среде не запускался. Автоматический поиск ограничен бюджетом и не обещает прохождение любого уровня.
+
+SHA256: `353a3c2e17655c90030ff0d6e418a665429c0c4f624b3518c31588f87c500b81`.
+
+[Исходный проект](./MacroLab-geode-5.11.1-source.zip)
