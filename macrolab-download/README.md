@@ -1,12 +1,11 @@
-# Macro Lab
+# Macro Lab 0.2.0
 
-[Скачать .geode](https://raw.githubusercontent.com/lexaaakorolevv-cyber/turbo-disco/macrolab-download-2026-10-13/macrolab-download/local.macrolab.geode)
+Целевая версия: **Geode 5.11.1 / Geometry Dash 2.2081 / Windows x64**.
 
-Windows x64, Geometry Dash 2.2074, Geode 4.10.0.
+Обновлены реальные API Popup/keyboard/processCommands. Исправлены конец replay до отпусканий, очистка сессии, ввод в паузе и F9 в модальных окнах. Добавлены профили поиска, независимые P2 hazards/gravity и ранние ветвления 24/48 ticks. Core CTest4/4, 81 assertions, actual SDK syntax10/10.
 
-Пакет собран на Windows в GitHub Actions: https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38439927784 . Core tests прошли, DLL и упаковка .geode проверены. Работа мода в самой игре ещё не проверена.
+[Исходники и инструкции](MacroLab-geode-5.11.1-source.zip)
 
-[Исходники и инструкции (ZIP)](MacroLab-geode-4.10.0-source.zip)
+После успешной Windows-сборки пакет появится как `local.macrolab-geode-5.11.1.geode`. Игровые механики в настоящей GD здесь не проверялись; ограничения остаются описаны в README исходного проекта.
 
-SHA-256 .geode: `6637a66a6d52c1253ab8808e72fe4d03274ccf5e9fd719f40003378c79138274`.
-SHA-256 source ZIP: `f041786a25158b0342befc0803225966b1d5404c7bc3ee92440109618ef43275`.
+SHA-256 source ZIP: `8edb7b6d00cdb106bbd14053493e61efe7fca17206748df6ead7e4ab10fcc176`.
