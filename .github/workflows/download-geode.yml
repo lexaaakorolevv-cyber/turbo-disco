@@ -41,7 +41,7 @@ jobs:
           $package = Get-ChildItem -Path $env:BUILD_OUTPUT -Filter *.geode -Recurse | Select-Object -First 1
           if (-not $package) { throw 'No .geode package produced by the Windows build' }
           Copy-Item $package.FullName macrolab-download/local.macrolab-geode-5.11.1.geode -Force
-          python -c "import zipfile,json,struct; p='macrolab-download/local.macrolab-geode-5.11.1.geode'; z=zipfile.ZipFile(p); assert z.testzip() is None; m=json.loads(z.read('mod.json')); assert m['id']=='local.macrolab'; assert m['geode']=='5.11.1'; assert m['gd']['win']=='2.2081'; dlls=[n for n in z.namelist() if n.endswith('.dll')]; assert dlls, 'No Windows DLL'; b=z.read(dlls[0]); assert b[:2]==b'MZ'; off=struct.unpack_from('<I',b,60)[0]; assert b[off:off+4]==b'PE\x00\x00'; assert struct.unpack_from('<H',b,off+4)[0]==0x8664, 'Not x64'; print('Valid .geode with x64 Windows DLL')"
+          python build-src/MacroLab/tests/font_resources_test.py --package macrolab-download/local.macrolab-geode-5.11.1.geode
       - uses: actions/upload-artifact@v4
         with:
           name: local.macrolab-geode-5.11.1
