@@ -1,0 +1,58 @@
+name: Build downloadable Macro Lab package
+on:
+  push:
+    branches: [macrolab-download-2026-10-13]
+    paths:
+      - .github/workflows/download-geode.yml
+      - macrolab-download/MacroLab-geode-4.10.0-source.zip
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract source
+        run: python3 -m zipfile -e macrolab-download/MacroLab-geode-4.10.0-source.zip build-src
+      - run: cmake -S build-src/MacroLab -B build-core -DMACROLAB_CORE_ONLY=ON -DCMAKE_BUILD_TYPE=Release
+      - run: cmake --build build-core --parallel
+      - run: ctest --test-dir build-core --output-on-failure
+  windows:
+    needs: core
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract source
+        shell: pwsh
+        run: Expand-Archive -Path macrolab-download/MacroLab-geode-4.10.0-source.zip -DestinationPath build-src
+      - uses: geode-sdk/build-geode-mod@main
+        id: build
+        with:
+          path: ./build-src/MacroLab
+          sdk: given
+          target: Win64
+          bindings-ref: f8aec5d1f3df76d840dfd2609f02cef30dc6efdf
+      - name: Stage installable package
+        shell: pwsh
+        env:
+          BUILD_OUTPUT: ${{ steps.build.outputs.build-output }}
+        run: |
+          $package = Get-ChildItem -Path $env:BUILD_OUTPUT -Filter *.geode -Recurse | Select-Object -First 1
+          if (-not $package) { throw 'No .geode package produced by the Windows build' }
+          Copy-Item $package.FullName macrolab-download/local.macrolab.geode -Force
+          python -c "import zipfile,json,struct; p='macrolab-download/local.macrolab.geode'; z=zipfile.ZipFile(p); assert z.testzip() is None; m=json.loads(z.read('mod.json')); assert m['id']=='local.macrolab'; dlls=[n for n in z.namelist() if n.endswith('.dll')]; assert dlls, 'No Windows DLL'; b=z.read(dlls[0]); assert b[:2]==b'MZ'; off=struct.unpack_from('<I',b,60)[0]; assert b[off:off+4]==b'PE\x00\x00'; assert struct.unpack_from('<H',b,off+4)[0]==0x8664, 'Not x64'; print('Valid .geode with x64 Windows DLL')"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local.macrolab-geode
+          path: macrolab-download/local.macrolab.geode
+      - name: Publish package download on this branch
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add macrolab-download/local.macrolab.geode
+          git commit -m 'Add Windows Macro Lab .geode package [skip ci]'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not commit the package' }
+          git push origin HEAD:macrolab-download-2026-10-13
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish the package' }
