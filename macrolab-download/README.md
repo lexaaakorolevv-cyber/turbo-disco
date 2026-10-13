@@ -1,11 +1,12 @@
-# Macro Lab — исходный проект
+# Macro Lab
 
-[Скачать ZIP](https://raw.githubusercontent.com/lexaaakorolevv-cyber/turbo-disco/macrolab-download-2026-10-13/macrolab-download/MacroLab-geode-4.10.0-source.zip)
+[Скачать .geode](https://raw.githubusercontent.com/lexaaakorolevv-cyber/turbo-disco/macrolab-download-2026-10-13/macrolab-download/local.macrolab.geode)
 
-Цель: Geometry Dash 2.2074, Geode SDK/Loader 4.10.0, Windows x64.
+Windows x64, Geometry Dash 2.2074, Geode 4.10.0.
 
-В архиве 36 файлов: C++ исходники, CMakeLists.txt, mod.json, русское меню, JSON-документация, ограниченный поиск, тесты и инструкции сборки/установки. Разверните архив и откройте MacroLab/README.md.
+Пакет собран на Windows в GitHub Actions: https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38439927784 . Core tests прошли, DLL и упаковка .geode проверены. Работа мода в самой игре ещё не проверена.
 
-Проверены 81 проверка ядра, CTest 2/2 и синтаксис/API всех 10 .cpp по настоящим Win64 bindings. MSVC-линковка, .geode и игровое тестирование не выполнялись. Это исходный прототип, не готовый бинарный мод.
+[Исходники и инструкции (ZIP)](MacroLab-geode-4.10.0-source.zip)
 
-SHA-256 архива: `7a18fbb37f2a6fd94241c1cfef63a0f8d5c6068f95368aae291440d548907179`.
+SHA-256 .geode: `6637a66a6d52c1253ab8808e72fe4d03274ccf5e9fd719f40003378c79138274`.
+SHA-256 source ZIP: `f041786a25158b0342befc0803225966b1d5404c7bc3ee92440109618ef43275`.
