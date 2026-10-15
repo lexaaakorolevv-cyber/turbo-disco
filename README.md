@@ -6,6 +6,8 @@
 
 Версия **1.0.1** исправляет сдвиг кнопок относительно окна Geode, привязывает HUD к экранному UILayer и повторно определяет активный PlayLayer при открытии меню и запуске операции. Вместо общего сообщения о незагруженном уровне выводится конкретный отсутствующий компонент. Размер окна учитывает разрешение игры. Макросы 1.0.0 следует записать заново: версия мода входит в профиль совместимости.
 
+[Скачать готовый .geode 1.0.1 для Windows x64](https://github.com/lexaaakorolevv-cyber/turbo-disco/raw/refs/heads/route-finder-windows/downloads/local.routefinder-windows-x64-v1.0.1.geode).
+
 ## Использование
 
 1. Установите подходящий Geode и мод, откройте обычный уровень. Справа сверху появятся кнопки **BOT** и **STOP**. Кнопка **BOT** также добавляется в обычное меню паузы и на экран завершения, чтобы повтор можно было запустить сразу после успеха.
@@ -71,7 +73,7 @@ cmake --build build-win --config Release --parallel 4
 
 SDK устанавливается отдельно от исходников мода. CMake намеренно требует **ровно 5.11.1** и сам загружает bindings на закреплённом commit; при другой версии нужна проверка адаптера, а не простая замена номера в `mod.json`. CMake также скачивает nlohmann/json и зависимости SDK. Команда Geode для установки бинарников должна выполняться на целевой платформе. Альтернатива — распаковать официальный `geode-v5.11.1-win.zip` в `<SDK>/bin/5.11.1/` (там должен появиться `Geode.lib`).
 
-Результат: `build-win/local.routefinder.geode`. Windows-сборка также проверена через [GitHub Actions](https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38746233992): компиляция, упаковка, тесты ядра и проверка архитектуры PE x64 прошли. Готовый пакет находится в `dist/local.routefinder-windows-x64.geode` при наличии локальных артефактов; в CI он публикуется как `route-finder-windows-x64`.
+Результат: `build-win/local.routefinder.geode`. Windows-сборка 1.0.1 также проверена через [GitHub Actions](https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38749334098): компиляция, упаковка, тесты ядра и проверка архитектуры PE x64 прошли. Готовый пакет находится в `dist/local.routefinder-windows-x64-v1.0.1.geode` при наличии локальных артефактов; в CI он публикуется как `route-finder-windows-x64`.
 
 ## Сборка Android ARM64 на Linux
 
@@ -98,6 +100,8 @@ cmake --build build-android64 --parallel 4
 ## Установка
 
 Закройте игру. Поместите `.geode` для своей платформы в папку `geode/mods` установленной Geometry Dash либо импортируйте локальный пакет в Geode Launcher на Android. Перезапустите игру и проверьте, что Route Finder включён. Для ПК выбирайте пакет `local.routefinder-windows-x64.geode`; пакет ARM64 не содержит Windows DLL.
+
+При обновлении удалите прежний файл Route Finder `.geode` из `geode/mods`, затем скопируйте новый. В меню BOT проверьте заголовок `Route Finder 1.0.1`.
 
 ## Проверки
 
