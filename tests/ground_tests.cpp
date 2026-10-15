@@ -9,13 +9,14 @@
 using namespace rf;
 namespace {
 void check(bool condition, char const* message) { if (!condition) throw std::runtime_error(message); }
-void runCourse(double speed, double scale, bool inverted, bool reverse, bool platforms) {
+void runCourse(double speed, double scale, bool inverted, bool reverse, bool platforms, int cps = 8, bool dense = false) {
     double floor = 91, half = 14 * scale;
     std::vector<Obstacle> local{{200, 224, floor, floor + 20 * scale},
         {410, 434, floor, floor + 25 * scale}, {660, 700, floor, floor + 15 * scale}};
     if (platforms) local = {{190, 250, floor, floor + 30, true},
         {380, 450, floor, floor + 55, true}, {550, 574, floor, floor + 20},
         {720, 780, floor, floor + 30, true}};
+    if (dense) { local.clear(); for (int i = 0; i < 4; ++i) local.push_back({160. + i * 115, 184. + i * 115, floor, floor + 20}); }
     auto objects = local;
     for (auto& o : objects) {
         if (reverse) { double left = -o.right; o.right = -o.left; o.left = left; }
@@ -23,7 +24,7 @@ void runCourse(double speed, double scale, bool inverted, bool reverse, bool pla
     }
     double x = 0, y = floor + half, vy = 0;
     bool grounded = true, held = false;
-    InputPacer pacer; pacer.reset(8);
+    InputPacer pacer; pacer.reset(cps);
     std::vector<Action> actions;
     for (Tick tick = 0; tick < 1000; ++tick) {
         double sign = inverted ? -1 : 1, direction = reverse ? -1 : 1;
@@ -33,7 +34,7 @@ void runCourse(double speed, double scale, bool inverted, bool reverse, bool pla
         bool down = pacer.apply(chooseGroundInput(s, objects).down, tick);
         if (down != held) appendAction(actions, tick, down);
         held = down;
-        check(pacer.currentCps() <= 8, "Cube exceeded CPS limit");
+        check(cps == 0 ? pacer.remainingFrames(tick) == 0 : pacer.currentCps() <= cps, "Cube input profile violated");
         // Independent semi-analytic oracle: different dt, gravity and position
         // integration from the predictor. The real GD is still a separate test.
         if (grounded && down) { vy = 11.05 * (scale < .9 ? .8 : 1); grounded = false; }
@@ -74,13 +75,16 @@ int main() {
         check(!sweptOverlap(4, 4, 5, 5, 1, 1, circle), "Circle empty corner treated as wall");
         check(sweptOverlap(40, 40, 60, 60, 1, 1, circle), "Circle collision missed");
         int passed = 0;
-        for (double speed : {4., 5.2, 6.6}) for (double scale : {1., .6})
+        for (int cps : {0, 8}) for (double speed : {4., 5.2, 6.6}) for (double scale : {1., .6})
             for (bool inverted : {false, true}) for (bool reverse : {false, true}) {
-                runCourse(speed, scale, inverted, reverse, false); ++passed;
+                runCourse(speed, scale, inverted, reverse, false, cps); ++passed;
             }
-        for (bool inverted : {false, true}) for (bool reverse : {false, true}) {
-            runCourse(5.2, 1, inverted, reverse, true); ++passed;
+        for (int cps : {0, 8}) for (bool inverted : {false, true}) for (bool reverse : {false, true}) {
+            runCourse(5.2, 1, inverted, reverse, true, cps); ++passed;
         }
-        std::cout << passed << " cube obstacle/platform scenarios at <=8 CPS; shape geometry: PASS\n";
+        for (bool inverted : {false, true}) for (bool reverse : {false, true}) {
+            runCourse(5.2, 1, inverted, reverse, false, 0, true); ++passed;
+        }
+        std::cout << passed << " cube obstacle/platform scenarios, uncapped and legacy 8 CPS; shape geometry: PASS\n";
     } catch (std::exception const& error) { std::cerr << error.what() << '\n'; return 1; }
 }

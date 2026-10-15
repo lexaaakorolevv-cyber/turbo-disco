@@ -33,6 +33,24 @@ bool safe(FlightObservation const& s, std::vector<FlightObstacle> const& objects
             s.y + s.halfHeight > o.bottom && s.y - s.halfHeight < o.top) return false;
     return true;
 }
+void tightWaveCourse(int spacing, int amplitude, bool inverted = false, double direction = 1) {
+    FlightObservation s;
+    s.mode = FlightMode::Wave; s.scale = .6; s.halfWidth = s.halfHeight = 7;
+    s.inverted = inverted; s.vx *= direction;
+    std::vector<FlightObstacle> objects;
+    for (int i = 0; i < 5; ++i) {
+        double x = 100. + spacing * i, mid = 150. + (i % 2 ? -amplitude : amplitude);
+        objects.push_back({x, x + 8, 0, mid - 18});
+        objects.push_back({x, x + 8, mid + 18, 300});
+    }
+    if (direction < 0) for (auto& o : objects) { double left = -o.right; o.right = -o.left; o.left = left; }
+    for (int tick = 0; tick < 600; ++tick) {
+        advance(s, chooseFlightInput(s, objects));
+        check(safe(s, objects), "Mini-wave failed a close sequence of narrow passages");
+        if (std::abs(s.x) > 110 + spacing * 4) return;
+    }
+    throw std::runtime_error("Narrow wave course did not finish");
+}
 void course(FlightMode mode, bool inverted, double scale, double direction) {
     FlightObservation state;
     state.mode = mode; state.inverted = inverted; state.scale = scale; state.vx *= direction;
@@ -42,13 +60,13 @@ void course(FlightMode mode, bool inverted, double scale, double direction) {
     auto initial = state;
     std::vector<Action> macro;
     InputPacer pacer;
-    pacer.reset(8);
+    pacer.reset(0);
     bool held = false;
     for (Tick tick = 0; tick < 900; ++tick) {
         state.holdRemaining = pacer.remainingFrames(tick) / 4.;
         state.minHold = pacer.dwellFrames() / 4.;
         bool down = pacer.apply(chooseFlightInput(state, objects), tick);
-        check(pacer.currentCps() <= 8, "Flight exceeded the configured CPS limit");
+        check(pacer.remainingFrames(tick) == 0, "Uncapped flight input was delayed");
         if (down != held) { appendAction(macro, tick, down); held = down; }
         advance(state, down);
         if (!safe(state, objects)) {
@@ -88,13 +106,13 @@ int main() {
         for (auto mode : {FlightMode::Ship, FlightMode::Wave}) {
             s = {}; s.mode = mode; s.y = 35; s.top = 1400;
             InputPacer pacer;
-            pacer.reset(8);
+            pacer.reset(0);
             Tick longest = 0, current = 0;
             for (int tick = 0; tick < 600; ++tick) {
                 s.holdRemaining = pacer.remainingFrames(tick) / 4.;
                 s.minHold = pacer.dwellFrames() / 4.;
                 bool down = pacer.apply(chooseFlightInput(s, {}), tick);
-                check(pacer.currentCps() <= 8, "Climb exceeded the configured CPS limit");
+                check(pacer.remainingFrames(tick) == 0, "Uncapped climb input was delayed");
                 current = down ? current + 1 : 0;
                 longest = std::max(longest, current);
                 advance(s, down);
@@ -105,6 +123,11 @@ int main() {
             for (bool inverted : {false, true}) for (double scale : {1., .6})
                 for (double direction : {1., -1.}) course(mode, inverted, scale, direction);
         }
+        for (int amplitude : {12, 24, 36}) tightWaveCourse(70, amplitude);
+        for (int amplitude : {12, 24}) tightWaveCourse(90, amplitude);
+        tightWaveCourse(110, 24);
+        tightWaveCourse(70, 24, true);
+        tightWaveCourse(70, 24, false, -1);
         Search search(1337, 120);
         std::vector<Action> previous{{10, true}, {30, false}, {200, true}, {500, false}, {650, true}};
         search.observe(previous, 700, 30, true);

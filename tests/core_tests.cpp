@@ -54,6 +54,21 @@ int main() {
         legacy.erase("search_max_cps");
         check(fromJson(legacy).searchMaxCps == 0, "Optional CPS provenance broke old schema");
 
+        {
+            InputPacer uncapped;
+            uncapped.reset(0);
+            bool down = false;
+            for (Tick frame = 0; frame < 240; ++frame) for (int half = 0; half < 4; ++half) {
+                down = !down;
+                check(uncapped.apply(down, frame) == down, "Uncapped transition was blocked");
+                check(uncapped.remainingFrames(frame) == 0 && uncapped.dwellFrames() == 0, "Uncapped input has a delay");
+            }
+            check(uncapped.currentCps() > 20, "CPS counter still imposes the old ceiling");
+            uncapped.reset();
+            check(uncapped.currentCps() == 0 && !uncapped.apply(false, 0), "Uncapped reset left stale input");
+            m.searchMaxCps = 0;
+            check(fromJson(toJson(m)).searchMaxCps == 0, "Uncapped macro provenance changed");
+        }
         for (int cps : {1, 3, 6, 8, 12, 20}) {
             InputPacer pacer;
             pacer.reset(cps);

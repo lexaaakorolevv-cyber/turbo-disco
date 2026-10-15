@@ -141,7 +141,7 @@ bool Runtime::prepare() {
     m_outerLimit = 240 * mod->getSettingValue<int64_t>("max-attempt-seconds");
     m_tickLimit = MaxTicks;
     m_seed = mod->getSettingValue<int64_t>("search-seed");
-    m_inputPacer.reset(static_cast<int>(mod->getSettingValue<int64_t>("max-cps")));
+    m_inputPacer.reset(0);
     m_started = std::chrono::steady_clock::now();
     m_attempts = 0;
     m_oldCBS = m_layer->m_clickBetweenSteps;
@@ -173,7 +173,7 @@ void Runtime::startSearch() {
     m_plan = m_search->next(m_tickLimit);
     m_flightFrom = m_search->guidanceFrom();
     m_restart = true;
-    m_status = fmt::format("Поиск: куб + корабль + волна; лимит {} CPS", m_inputPacer.limit());
+    m_status = "Поиск: куб + корабль + волна; CPS без ограничений";
 }
 void Runtime::play() {
     if (!m_selected) { m_status = "Сначала загрузите или найдите макрос"; return; }
@@ -661,7 +661,7 @@ std::string Runtime::hudSummary() const {
             flight = fmt::format(" | {}: {}", p->m_isDart ? "Волна" : "Корабль", m_held ? "ЗАЖИМ" : "отпущено");
         else if (!p->m_isBird && !p->m_isBall && !p->m_isRobot && !p->m_isSpider && !p->m_isSwing)
             flight = fmt::format(" | Куб: {}", m_held ? "прыжок" : "бег");
-        flight += fmt::format(" | {}/{} CPS", m_inputPacer.currentCps(), m_inputPacer.limit());
+        flight += fmt::format(" | {} CPS (без лимита)", m_inputPacer.currentCps());
     }
     return fmt::format("RF {} | {}{}\nПопыток: {} | Лучший: {:.1f}%", ModVersion, state, flight, m_attempts, best);
 }

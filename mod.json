@@ -1,17 +1,49 @@
 {
     "geode": "5.11.1",
-    "gd": { "win": "2.2081", "android": "2.2081" },
+    "gd": {
+        "win": "2.2081",
+        "android": "2.2081"
+    },
     "id": "local.routefinder",
     "name": "Route Finder",
-    "version": "v1.2.0",
+    "version": "v1.3.0",
     "developer": "Route Finder contributors",
     "description": "Physics-tick recorder, replay verifier and bounded single-player route search.",
     "settings": {
-        "max-cps": { "type": "int", "name": "Bot CPS limit (search)", "description": "Maximum presses per second during search. Recording and replay preserve exact input. Lower limits may prevent narrow passages.", "default": 8, "min": 1, "max": 20 },
-        "max-attempts": { "type": "int", "name": "Attempt limit (includes verification)", "default": 2000, "min": 2, "max": 100000 },
-        "max-seconds": { "type": "int", "name": "Wall time limit (seconds)", "default": 600, "min": 10, "max": 86400 },
-        "max-attempt-seconds": { "type": "int", "name": "Per-attempt simulation limit (seconds)", "default": 600, "min": 10, "max": 1800 },
-        "mutation-window": { "type": "int", "name": "Mutation window (physics ticks)", "default": 120, "min": 8, "max": 2400 },
-        "search-seed": { "type": "int", "name": "Search seed", "default": 1337, "min": 1, "max": 2147483647 }
+        "max-attempts": {
+            "type": "int",
+            "name": "Attempt limit (includes verification)",
+            "default": 2000,
+            "min": 2,
+            "max": 100000
+        },
+        "max-seconds": {
+            "type": "int",
+            "name": "Wall time limit (seconds)",
+            "default": 600,
+            "min": 10,
+            "max": 86400
+        },
+        "max-attempt-seconds": {
+            "type": "int",
+            "name": "Per-attempt simulation limit (seconds)",
+            "default": 600,
+            "min": 10,
+            "max": 1800
+        },
+        "mutation-window": {
+            "type": "int",
+            "name": "Mutation window (physics ticks)",
+            "default": 120,
+            "min": 8,
+            "max": 2400
+        },
+        "search-seed": {
+            "type": "int",
+            "name": "Search seed",
+            "default": 1337,
+            "min": 1,
+            "max": 2147483647
+        }
     }
 }

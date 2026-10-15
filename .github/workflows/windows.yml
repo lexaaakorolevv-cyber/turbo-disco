@@ -51,9 +51,10 @@ jobs:
               assert z.testzip() is None
               manifest = json.loads(z.read('mod.json'))
               assert manifest['id'] == 'local.routefinder'
-              assert manifest['version'] == 'v1.2.0'
+              assert manifest['version'] == 'v1.3.0'
               assert manifest['geode'] == '5.11.1'
               assert manifest['gd']['win'] == '2.2081'
+              assert 'max-cps' not in manifest.get('settings', {})
               dll = z.read('local.routefinder.dll')
               assert dll[:2] == b'MZ'
               pe = struct.unpack_from('<I', dll, 0x3c)[0]

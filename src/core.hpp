@@ -11,7 +11,7 @@
 namespace rf {
 using Tick = std::uint64_t;
 inline constexpr Tick MaxTicks = 240 * 1800;
-inline constexpr char ModVersion[] = "1.2.0";
+inline constexpr char ModVersion[] = "1.3.0";
 
 struct Action {
     Tick tick = 0;
@@ -49,7 +49,7 @@ struct Macro {
     bool verified = false; // Provenance only when loaded from disk; runtime must recheck.
     std::uint64_t attempts = 0;
     std::uint64_t searchSeed = 0;
-    int searchMaxCps = 0; // Search provenance; 0 means an uncapped manual recording.
+    int searchMaxCps = 0; // Search provenance; 0 means uncapped input (manual or automatic).
     std::string stopReason;
 };
 

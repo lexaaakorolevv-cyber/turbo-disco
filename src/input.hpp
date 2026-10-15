@@ -9,10 +9,12 @@ namespace rf {
 class InputPacer {
 public:
     using Frame = std::uint64_t;
-    void reset(int maxCps = 8) {
-        m_limit = std::clamp(maxCps, 1, 20);
-        m_dwell = (240 + 2 * m_limit - 1) / (2 * m_limit);
-        m_period = (240 + m_limit - 1) / m_limit;
+    void reset(int maxCps = 0) {
+        // Zero is uncapped. Keep legacy capped profiles readable/testable,
+        // but the live search always uses zero and forwards every transition.
+        m_limit = maxCps <= 0 ? 0 : std::clamp(maxCps, 1, 20);
+        m_dwell = m_limit ? (240 + 2 * m_limit - 1) / (2 * m_limit) : 0;
+        m_period = m_limit ? (240 + m_limit - 1) / m_limit : 0;
         m_held = false;
         m_changed = false;
         m_lastEdge = 0;
@@ -29,6 +31,7 @@ public:
         return m_held;
     }
     Frame remainingFrames(Frame now) const {
+        if (!m_limit) return 0;
         Frame until = m_changed ? m_lastEdge + m_dwell : 0;
         if (!m_held && !m_presses.empty()) {
             until = std::max(until, m_presses.back() + m_period);
@@ -41,8 +44,8 @@ public:
     int limit() const { return m_limit; }
     int currentCps() const { return static_cast<int>(m_presses.size()); }
 private:
-    int m_limit = 8;
-    Frame m_dwell = 15, m_period = 30, m_lastEdge = 0;
+    int m_limit = 0;
+    Frame m_dwell = 0, m_period = 0, m_lastEdge = 0;
     bool m_held = false, m_changed = false;
     std::deque<Frame> m_presses;
 };
