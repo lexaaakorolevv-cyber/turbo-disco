@@ -1,0 +1,72 @@
+name: Build Route Finder for Windows
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install pinned Geode CLI and SDK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cliDir = Join-Path $env:RUNNER_TEMP 'routefinder-cli'
+          $cliZip = Join-Path $env:RUNNER_TEMP 'geode-cli.zip'
+          Invoke-WebRequest 'https://github.com/geode-sdk/cli/releases/download/v3.9.0/geode-cli-v3.9.0-win.zip' -OutFile $cliZip
+          Expand-Archive $cliZip $cliDir
+          $cliDir | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          $sdk = Join-Path $env:RUNNER_TEMP 'routefinder-geode-sdk'
+          git clone --depth 1 --branch v5.11.1 https://github.com/geode-sdk/geode.git $sdk
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $bins = Join-Path $sdk 'bin/5.11.1'
+          New-Item -ItemType Directory -Path $bins -Force | Out-Null
+          $sdkZip = Join-Path $env:RUNNER_TEMP 'geode-win.zip'
+          Invoke-WebRequest 'https://github.com/geode-sdk/geode/releases/download/v5.11.1/geode-v5.11.1-win.zip' -OutFile $sdkZip
+          Expand-Archive $sdkZip $bins -Force
+          if (-not (Test-Path (Join-Path $bins 'Geode.lib'))) { throw 'Geode.lib not found' }
+          "GEODE_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Configure Windows x64 mod
+        run: cmake -S . -B build-win -A x64 -DGEODE_DISABLE_PRECOMPILED_HEADERS=ON
+      - name: Build and package Windows x64 mod
+        run: cmake --build build-win --config Release --parallel 4
+      - name: Configure portable core tests
+        run: cmake -S . -B build-core -A x64 -DROUTEFINDER_CORE_ONLY=ON
+      - name: Build portable core tests
+        run: cmake --build build-core --config Release --parallel 4
+      - name: Run portable core tests on Windows
+        run: ctest --test-dir build-core -C Release --output-on-failure
+      - name: Check package and Windows PE architecture
+        shell: python
+        run: |
+          import hashlib, json, pathlib, struct, zipfile
+          p = pathlib.Path('build-win/local.routefinder.geode')
+          with zipfile.ZipFile(p) as z:
+              assert z.testzip() is None
+              manifest = json.loads(z.read('mod.json'))
+              assert manifest['id'] == 'local.routefinder'
+              assert manifest['geode'] == '5.11.1'
+              assert manifest['gd']['win'] == '2.2081'
+              dll = z.read('local.routefinder.dll')
+              assert dll[:2] == b'MZ'
+              pe = struct.unpack_from('<I', dll, 0x3c)[0]
+              assert dll[pe:pe+4] == b'PE\0\0'
+              assert struct.unpack_from('<H', dll, pe + 4)[0] == 0x8664
+          digest = hashlib.sha256(p.read_bytes()).hexdigest()
+          pathlib.Path('build-win/SHA256SUMS.txt').write_text(digest + '  ' + p.name + '\n')
+          print('Windows x64 .geode integrity: PASS')
+      - name: Upload Windows download
+        uses: actions/upload-artifact@v4
+        with:
+          name: route-finder-windows-x64
+          path: |
+            build-win/local.routefinder.geode
+            build-win/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
