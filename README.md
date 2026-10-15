@@ -84,7 +84,7 @@ cmake --build build-win --config Release --parallel 4
 
 SDK устанавливается отдельно от исходников мода. CMake намеренно требует **ровно 5.11.1** и сам загружает bindings на закреплённом commit; при другой версии нужна проверка адаптера, а не простая замена номера в `mod.json`. CMake также скачивает nlohmann/json и зависимости SDK. Команда Geode для установки бинарников должна выполняться на целевой платформе. Альтернатива — распаковать официальный `geode-v5.11.1-win.zip` в `<SDK>/bin/5.11.1/` (там должен появиться `Geode.lib`).
 
-Результат: `build-win/local.routefinder.geode`. Windows-сборка 1.1.0 также проверена через [GitHub Actions](https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38753810592): компиляция, упаковка, оба набора тестов и проверка архитектуры PE x64 прошли. Готовый пакет находится в `dist/local.routefinder-windows-x64-v1.1.0.geode` при наличии локальных артефактов; в CI он публикуется как `route-finder-windows-x64`.
+Результат: `build-win/local.routefinder.geode`. Windows-сборка 1.1.1 также проверена через [GitHub Actions](https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38756879366): компиляция, упаковка, оба набора тестов и проверка архитектуры PE x64 прошли. Готовый пакет находится в `dist/local.routefinder-windows-x64-v1.1.1.geode` при наличии локальных артефактов; в CI он публикуется как `route-finder-windows-x64`.
 
 ## Сборка Android ARM64 на Linux
 
