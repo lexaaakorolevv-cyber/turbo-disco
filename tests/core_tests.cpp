@@ -157,7 +157,7 @@ int main() {
             for (Tick t = 0; t < valid.ticks; t += 16) valid.trace.push_back({t, 0, 0, 0, 1, 1, .25});
             valid.actions = seq;
             validate(valid);
-            check(search.size() <= 8, "Elite archive unbounded");
+            check(search.size() <= Search::ArchiveLimit, "Elite archive unbounded");
             if (death == 200) { solved = true; break; }
         }
         check(solved, "Search failed simple obstacle oracle");

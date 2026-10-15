@@ -2,6 +2,7 @@
 #include "core.hpp"
 #include "flight.hpp"
 #include "input.hpp"
+#include "ground.hpp"
 #include <Geode/Geode.hpp>
 #include <chrono>
 #include <memory>
@@ -69,6 +70,7 @@ private:
     bool m_searchDesired = false;
     InputPacer m_inputPacer;
     std::vector<FlightObstacle> m_flightObstacles;
+    double m_spawnFloor = 90;
     std::string unsupported() const;
     std::string readinessError() const;
     nlohmann::json environment() const;
@@ -77,6 +79,7 @@ private:
     void releaseInput();
     void inject(bool down);
     void guideFlight(PlayerObject* player);
+    void collectObstacles(double minX, double maxX, double minY, double maxY);
     Macro snapshot(bool complete = false) const;
     void remember(Macro const& macro);
     void writeBest();

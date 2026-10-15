@@ -1,10 +1,9 @@
 #pragma once
 #include <span>
+#include "geometry.hpp"
 
 namespace rf {
-struct FlightObstacle {
-    double left, right, bottom, top;
-};
+using FlightObstacle = Obstacle;
 enum class FlightMode { Ship, Wave };
 struct FlightObservation {
     double x = 0, y = 150, vy = 0, vx = 5.77;

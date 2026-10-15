@@ -201,10 +201,22 @@ void Search::observe(std::vector<Action> const& actions, Tick death, double perc
     })) return;
     m_elites.push_back(std::move(candidate));
     std::stable_sort(m_elites.begin(), m_elites.end(), [](Elite const& a, Elite const& b) {
-        if (std::abs(a.percent - b.percent) > 1e-6) return a.percent > b.percent;
+        if (a.percent != b.percent) return a.percent > b.percent;
+        if (a.actions.size() != b.actions.size()) return a.actions.size() < b.actions.size();
         return a.deathTick > b.deathTick;
     });
-    if (m_elites.size() > 8) m_elites.resize(8);
+    // Retain several routes to the frontier instead of filling the archive
+    // entirely with near-identical failures at the same percentage.
+    std::vector<Elite> diverse;
+    for (auto& elite : m_elites) {
+        auto bucket = static_cast<int>(elite.percent * 4);
+        auto count = std::count_if(diverse.begin(), diverse.end(), [&](auto const& e) {
+            return static_cast<int>(e.percent * 4) == bucket;
+        });
+        if (count < 4) diverse.push_back(std::move(elite));
+        if (diverse.size() == ArchiveLimit) break;
+    }
+    m_elites = std::move(diverse);
 }
 Search::Elite const& Search::best() const {
     if (m_elites.empty()) throw std::logic_error("No observed attempts");
@@ -213,47 +225,62 @@ Search::Elite const& Search::best() const {
 std::vector<Action> Search::next(Tick limit) {
     m_guidanceFrom = 0;
     if (!limit) return {};
-    if (m_elites.empty()) return {}; // First attempt establishes the no-input frontier.
-    auto generation = m_generation++;
-    auto const& parent = m_elites[(generation % 7 == 6) ? m_rng() % m_elites.size() : 0];
-    Tick window = std::min<Tick>(m_window * (1 + m_stale / 48), 2400);
-    Tick death = std::min(parent.deathTick, limit - 1);
-    Tick back = 1 + ((generation / 8) * 37) % window;
-    // Flight failures often require a sustained climb or early braking, not a
-    // change on the last tick. Re-plan at least half a second where the
-    // configured mutation window permits it.
-    if (parent.flight) back = std::min(window, std::max<Tick>(back, 120));
-    Tick start = death > back ? death - back : 0;
-    if (generation % 8 == 7) { // Random wider rollback, including previously useful clicks.
-        start = death > window ? death - window : 0;
-        start += m_rng() % (death - start + 1);
-    }
-    auto result = prefix(parent.actions, start);
-    if (parent.flight) {
-        // Keep the successful flight exactly until the rollback boundary.
-        // Re-plan the ship/wave tail with a new policy and unrestricted holds.
-        m_guidanceFrom = start;
-        return result;
-    }
-    static constexpr Tick holds[]{1, 4, 8, 16, 32, 64, 128, 240, 480, 960};
-    if (generation % 8 != 7) {
-        // Enumerate a pulse or release before the collision, preserving the
-        // exact earlier prefix. A held parent is also explored as a release.
-        bool initial = heldBefore(result, start);
-        appendAction(result, start, !initial);
-        auto end = start + holds[(generation % 7 + generation / 56) % 10];
-        // Every seventh candidate keeps holding/releasing until the end. A
-        // long climb must never be capped by the old 128-tick pulse limit.
-        if (generation % 8 != 6 && end < limit) appendAction(result, end, initial);
-    } else {
-        auto end = std::min<Tick>(limit, death + 480);
-        bool down = heldBefore(result, start);
-        for (Tick t = start; t < end; t += 1 + m_rng() % 80) {
-            down = !down;
-            appendAction(result, t, down);
+    if (m_elites.empty()) { m_policy = 0; m_generation = 1; return {}; }
+    std::vector<Action> result;
+    for (int retry = 0; retry < 64; ++retry) {
+        auto generation = m_generation++;
+        auto const& parent = m_elites[generation % 3 == 2 ? m_rng() % m_elites.size() : 0];
+        Tick window = std::min<Tick>(m_window * (1 + m_stale / 16), 2400);
+        Tick death = std::min(parent.deathTick, limit - 1);
+        static constexpr Tick rollback[]{120, 64, 192, 32, 256, 96, 384, 512};
+        Tick back = std::min(window, rollback[generation % 8]);
+        if (parent.flight) back = std::min(window, std::max<Tick>(back, 120));
+        Tick start = death > back ? death - back : 0;
+        auto kind = generation % 6;
+        m_policy = (generation * 17 + generation / 6) % 99;
+        if (kind == 0 || kind == 1 || kind == 4) {
+            // A cube cannot correct an already committed jump while airborne.
+            // Start before the takeoff that led to the failure.
+            if (!parent.flight) for (auto i = parent.actions.rbegin(); i != parent.actions.rend(); ++i)
+                if (i->down && i->tick + window >= death) {
+                    start = std::min(start, i->tick > 8 ? i->tick - 8 : 0);
+                    break;
+                }
+            result = prefix(parent.actions, start);
+            m_guidanceFrom = start;
+        } else if (kind == 2 && std::any_of(parent.actions.begin(), parent.actions.end(),
+            [&](auto const& a) { return a.tick < limit; })) {
+            result = prefix(parent.actions, limit);
+            auto index = result.size() - 1 - m_rng() % std::min<std::size_t>(6, result.size());
+            static constexpr int shifts[]{-1, 1, -2, 2, -4, 4, -8, 8, -16, 16, -32, 32};
+            auto shifted = static_cast<std::int64_t>(result[index].tick) + shifts[(generation / 6) % 12];
+            result[index].tick = static_cast<Tick>(std::clamp<std::int64_t>(shifted, 0, limit - 1));
+            std::stable_sort(result.begin(), result.end(), [](auto const& a, auto const& b) { return a.tick < b.tick; });
+            auto raw = std::move(result); result.clear();
+            for (auto const& a : raw) appendAction(result, a.tick, a.down);
+            m_guidanceFrom = result.empty() ? 0 : result.back().tick + 1;
+        } else {
+            if (kind == 5) start = death > window ? death - window : 0;
+            result = prefix(parent.actions, start);
+            bool down = heldBefore(result, start);
+            if (kind == 5) {
+                for (Tick t = start; t < std::min(limit, death + 120); t += 15 + m_rng() % 105)
+                    appendAction(result, t, down = !down);
+            } else {
+                static constexpr Tick holds[]{1, 4, 8, 16, 32, 64, 128, 240, 480};
+                appendAction(result, start, !down);
+                Tick end = start + holds[(generation / 6) % 9];
+                if (generation % 18 != 3 && end < limit) appendAction(result, end, down);
+            }
+            m_guidanceFrom = result.empty() ? start : result.back().tick + 1;
         }
+        std::uint64_t hash = 1469598103934665603ULL;
+        auto mix = [&](std::uint64_t v) { hash = (hash ^ v) * 1099511628211ULL; };
+        mix(m_guidanceFrom); mix(m_policy);
+        for (auto const& a : result) { mix(a.tick); mix(a.down); }
+        if (m_issued.size() >= 8192) m_issued.clear();
+        if (m_issued.insert(hash).second) break;
     }
-    m_guidanceFrom = std::max(start, result.empty() ? Tick{0} : result.back().tick + 1);
     return result;
 }
 

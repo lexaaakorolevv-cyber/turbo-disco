@@ -219,8 +219,80 @@ void Runtime::inject(bool down) {
     appendAction(m_trial.actions, m_tick, down);
 }
 
+void Runtime::collectObstacles(double minX, double maxX, double minY, double maxY) {
+    m_flightObstacles.clear();
+    if (m_layer->m_objects) for (auto object : CCArrayExt<GameObject*>(m_layer->m_objects)) {
+        auto type = object->m_objectType;
+        if (type != GameObjectType::Solid && type != GameObjectType::Breakable && type != GameObjectType::Hazard &&
+            type != GameObjectType::AnimatedHazard && type != GameObjectType::Slope) continue;
+        if (object->m_isDisabled || object->m_isGroupDisabled || object->m_isNoTouch || object->m_isPassable) continue;
+        auto rect = object->getObjectRect();
+        FlightObstacle obstacle{rect.getMinX(), rect.getMaxX(), rect.getMinY(), rect.getMaxY()};
+        obstacle.solid = type == GameObjectType::Solid || type == GameObjectType::Breakable ||
+            (type == GameObjectType::Slope && !object->m_slopeIsHazard);
+        if (object->m_objectRadius > 0) {
+            double radius = object->getObjectRadius();
+            double cx = (obstacle.left + obstacle.right) / 2, cy = (obstacle.bottom + obstacle.top) / 2;
+            obstacle = {cx - radius, cx + radius, cy - radius, cy + radius, obstacle.solid, radius};
+        } else if (type == GameObjectType::Slope) {
+            // Native helpers identify the two flat sides of the right triangle.
+            double x = object->slopeWallLeft() ? obstacle.left : obstacle.right;
+            double y = object->slopeFloorTop() ? obstacle.top : obstacle.bottom;
+            obstacle.vertexCount = 3;
+            obstacle.vertices = {Point{x, y}, Point{x == obstacle.left ? obstacle.right : obstacle.left, y},
+                Point{x, y == obstacle.bottom ? obstacle.top : obstacle.bottom}, Point{}};
+        } else if (object->m_shouldUseOuterOb) {
+            // The real native oriented box supplies transformed world corners.
+            if (auto box = object->getOrientedBox()) {
+                Point center{};
+                bool valid = true;
+                for (int i = 0; i < 4; ++i) {
+                    auto p = box->m_corners[i];
+                    valid = valid && std::isfinite(p.x) && std::isfinite(p.y);
+                    obstacle.vertices[i] = {p.x, p.y}; center.x += p.x / 4.; center.y += p.y / 4.;
+                }
+                // If another mod changes corner semantics, retain the native
+                // rectangle instead of using unrecognised local coordinates.
+                if (valid && std::abs(center.x - rect.getMidX()) < rect.size.width + 2 &&
+                    std::abs(center.y - rect.getMidY()) < rect.size.height + 2) {
+                    std::sort(obstacle.vertices.begin(), obstacle.vertices.end(), [&](Point a, Point b) {
+                        return std::atan2(a.y - center.y, a.x - center.x) < std::atan2(b.y - center.y, b.x - center.x);
+                    });
+                    double area = 0;
+                    for (int i = 0; i < 4; ++i) {
+                        auto a = obstacle.vertices[i], b = obstacle.vertices[(i + 1) % 4];
+                        area += a.x * b.y - a.y * b.x;
+                    }
+                    if (std::abs(area) > .001) {
+                        obstacle.vertexCount = 4;
+                        obstacle.left = obstacle.right = obstacle.vertices[0].x;
+                        obstacle.bottom = obstacle.top = obstacle.vertices[0].y;
+                        for (auto p : obstacle.vertices) {
+                            obstacle.left = std::min(obstacle.left, p.x); obstacle.right = std::max(obstacle.right, p.x);
+                            obstacle.bottom = std::min(obstacle.bottom, p.y); obstacle.top = std::max(obstacle.top, p.y);
+                        }
+                    }
+                }
+            }
+        }
+        if (!std::isfinite(obstacle.left) || !std::isfinite(obstacle.right) || !std::isfinite(obstacle.bottom) ||
+            !std::isfinite(obstacle.top) || obstacle.right < minX || obstacle.left > maxX ||
+            obstacle.top < minY || obstacle.bottom > maxY) continue;
+        m_flightObstacles.push_back(obstacle);
+    }
+    if (m_flightObstacles.size() > 512) {
+        double x = m_layer->m_player1->getPositionX();
+        std::stable_sort(m_flightObstacles.begin(), m_flightObstacles.end(), [&](auto const& a, auto const& b) {
+            return std::abs((a.left + a.right) / 2 - x) < std::abs((b.left + b.right) / 2 - x);
+        });
+        m_flightObstacles.resize(512);
+    }
+}
+
 void Runtime::guideFlight(PlayerObject* player) {
-    int kind = player->m_isDart ? 2 : player->m_isShip ? 1 : 0;
+    bool cube = !player->m_isShip && !player->m_isDart && !player->m_isBird && !player->m_isBall &&
+        !player->m_isRobot && !player->m_isSpider && !player->m_isSwing && !player->m_isSideways && !player->m_isOnSlope;
+    int kind = player->m_isDart ? 2 : player->m_isShip ? 1 : cube ? 3 : 0;
     if (!kind) {
         // Release a controller-generated hold at a mode exit. Replayed prefix
         // actions remain untouched because m_guidedFlight is false there.
@@ -258,39 +330,26 @@ void Runtime::guideFlight(PlayerObject* player) {
         state.bottom = state.y - 150;
         state.top = state.y + 150;
     }
-    m_flightObstacles.clear();
-    double reach = std::abs(state.vx) * 56 + state.halfWidth;
+    double reach = std::abs(state.vx) * 76 + state.halfWidth;
     double minX = state.x + std::min(0., state.vx < 0 ? -reach : reach) - state.halfWidth;
     double maxX = state.x + std::max(0., state.vx < 0 ? -reach : reach) + state.halfWidth;
-    if (m_layer->m_objects) for (auto object : CCArrayExt<GameObject*>(m_layer->m_objects)) {
-        auto type = object->m_objectType;
-        if (type != GameObjectType::Solid && type != GameObjectType::Breakable && type != GameObjectType::Hazard &&
-            type != GameObjectType::AnimatedHazard && type != GameObjectType::Slope) continue;
-        if (object->m_isDisabled || object->m_isGroupDisabled || object->m_isNoTouch || object->m_isPassable) continue;
-        // Invisible collision objects still count. getObjectRect returns the
-        // current transformed box, including movement already applied by GD.
-        auto rect = object->getObjectRect();
-        FlightObstacle obstacle{rect.getMinX(), rect.getMaxX(), rect.getMinY(), rect.getMaxY()};
-        if (object->m_objectRadius > 0) {
-            double radius = object->m_objectRadius;
-            double cx = (obstacle.left + obstacle.right) / 2, cy = (obstacle.bottom + obstacle.top) / 2;
-            obstacle = {std::min(obstacle.left, cx - radius), std::max(obstacle.right, cx + radius),
-                std::min(obstacle.bottom, cy - radius), std::max(obstacle.top, cy + radius)};
-        }
-        if (!std::isfinite(obstacle.left) || !std::isfinite(obstacle.right) || !std::isfinite(obstacle.bottom) ||
-            !std::isfinite(obstacle.top) || obstacle.right < minX || obstacle.left > maxX ||
-            obstacle.top < state.bottom || obstacle.bottom > state.top) continue;
-        m_flightObstacles.push_back(obstacle);
+    if (kind == 3) {
+        collectObstacles(minX, maxX, std::min(m_spawnFloor, state.y - 500), state.y + 700);
+        GroundObservation ground{state.x, state.y, state.vy, state.vx, state.halfWidth, state.halfHeight,
+            player->m_isUpsideDown ? 1e6 : m_spawnFloor,
+            std::abs(player->m_yStart) * (player->m_vehicleSize < .9 ? .8 : 1),
+            std::abs(player->m_gravity * player->m_gravityMod), state.holdRemaining,
+            player->m_isOnGround, player->m_isUpsideDown, m_held};
+        static constexpr double timing[]{0, -.25, .25, -.5, .5, -1, 1, -1.5, 1.5, -2, 2};
+        auto policy = m_search ? m_search->policy() : 0;
+        auto decision = chooseGroundInput(ground, m_flightObstacles, timing[policy % 11]);
+        m_searchDesired = decision.down;
+        if (!ground.grounded && player->m_touchingRings && player->m_touchingRings->count() &&
+            !m_held && (decision.passiveSurvival < 20 || policy % 4 == 1)) m_searchDesired = true;
+        return;
     }
-    // Bound planning cost even in very dense levels. Actual collisions are
-    // always resolved by the game; the forecast is only a search heuristic.
-    if (m_flightObstacles.size() > 512) {
-        std::stable_sort(m_flightObstacles.begin(), m_flightObstacles.end(), [&](auto const& a, auto const& b) {
-            return std::abs((a.left + a.right) / 2 - state.x) < std::abs((b.left + b.right) / 2 - state.x);
-        });
-        m_flightObstacles.resize(512);
-    }
-    auto down = chooseFlightInput(state, m_flightObstacles, flightTuning(m_attempts, m_seed));
+    collectObstacles(minX, maxX, state.bottom, state.top);
+    auto down = chooseFlightInput(state, m_flightObstacles, flightTuning((m_search ? m_search->policy() : 0) + 1, m_seed));
     // No pulse timeout: holding can continue for seconds or a whole section.
     m_searchDesired = down;
 }
@@ -316,6 +375,10 @@ void Runtime::beginAttempt() {
     m_layer->m_clickBetweenSteps = false;
     m_layer->m_clickOnSteps = false;
     m_trial = {};
+    if (auto player = m_layer->m_player1) {
+        auto rect = player->getObjectRect();
+        m_spawnFloor = player->getPositionY() - rect.size.height / 2.;
+    }
     m_trial.environment = m_environment;
     m_tick = 0;
     m_outerUpdates = 0;
@@ -596,6 +659,8 @@ std::string Runtime::hudSummary() const {
         auto p = m_layer->m_player1;
         if (p->m_isShip || p->m_isDart)
             flight = fmt::format(" | {}: {}", p->m_isDart ? "Волна" : "Корабль", m_held ? "ЗАЖИМ" : "отпущено");
+        else if (!p->m_isBird && !p->m_isBall && !p->m_isRobot && !p->m_isSpider && !p->m_isSwing)
+            flight = fmt::format(" | Куб: {}", m_held ? "прыжок" : "бег");
         flight += fmt::format(" | {}/{} CPS", m_inputPacer.currentCps(), m_inputPacer.limit());
     }
     return fmt::format("RF {} | {}{}\nПопыток: {} | Лучший: {:.1f}%", ModVersion, state, flight, m_attempts, best);

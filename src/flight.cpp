@@ -20,12 +20,6 @@ struct Node {
     double y, vy, cost, wait;
     bool held, first;
 };
-bool overlaps(double x1, double y1, double x2, double y2,
-    double rx, double ry, FlightObstacle const& o) {
-    // Swept AABB: do not jump through thin spikes between forecast samples.
-    return std::max(x1, x2) + rx > o.left && std::min(x1, x2) - rx < o.right &&
-        std::max(y1, y2) + ry > o.bottom && std::min(y1, y2) - ry < o.top;
-}
 }
 bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle const> obstacles, FlightTuning tuning) {
     if (!std::isfinite(s.x) || !std::isfinite(s.y) || !std::isfinite(s.vy) ||
@@ -43,9 +37,11 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
     // Wave can turn immediately, so its target slice may be much closer.
     double lookX = s.x + s.vx * (s.mode == FlightMode::Ship ? 32 : 18) * tuning.horizonScale;
     std::vector<std::pair<double, double>> blocked;
-    for (auto const& o : obstacles)
-        if (lookX + rx >= o.left && lookX - rx <= o.right && o.top + ry > low && o.bottom - ry < high)
-            blocked.emplace_back(std::max(low, o.bottom - ry), std::min(high, o.top + ry));
+    for (auto const& o : obstacles) {
+        auto span = verticalSpan(o, lookX, rx);
+        if (span && span->second + ry > low && span->first - ry < high)
+            blocked.emplace_back(std::max(low, span->first - ry), std::min(high, span->second + ry));
+    }
     std::sort(blocked.begin(), blocked.end());
     double cursor = low, target = desired, best = std::numeric_limits<double>::infinity();
     auto gap = [&](double a, double b) {
@@ -95,7 +91,7 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
             if (child.y < low || child.y > high) continue;
             bool collision = false;
             for (auto const& obstacle : obstacles)
-                if (overlaps(x1, node.y, x2, child.y, rx, ry, obstacle)) { collision = true; break; }
+                if (sweptOverlap(x1, node.y, x2, child.y, rx, ry, obstacle)) { collision = true; break; }
             if (collision) continue;
             // A small height error is preferable to continuous correction.
             double error = std::max(0., std::abs(child.y - target) - 6.);

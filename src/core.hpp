@@ -5,12 +5,13 @@
 #include <random>
 #include <string>
 #include <vector>
+#include <unordered_set>
 #include <nlohmann/json.hpp>
 
 namespace rf {
 using Tick = std::uint64_t;
 inline constexpr Tick MaxTicks = 240 * 1800;
-inline constexpr char ModVersion[] = "1.1.1";
+inline constexpr char ModVersion[] = "1.2.0";
 
 struct Action {
     Tick tick = 0;
@@ -66,6 +67,7 @@ std::vector<Action> prefix(std::vector<Action> const& actions, Tick endExclusive
 // replayed from a native reset; forecasts never certify an elite or a success.
 class Search {
 public:
+    static constexpr std::size_t ArchiveLimit = 24;
     struct Elite {
         std::vector<Action> actions;
         Tick deathTick = 0;
@@ -78,11 +80,14 @@ public:
     Elite const& best() const;
     std::size_t size() const { return m_elites.size(); }
     Tick guidanceFrom() const { return m_guidanceFrom; }
+    std::uint64_t policy() const { return m_policy; }
 private:
     std::mt19937_64 m_rng;
     Tick m_window;
     std::uint64_t m_generation = 0, m_stale = 0;
     Tick m_guidanceFrom = 0;
+    std::uint64_t m_policy = 0;
+    std::unordered_set<std::uint64_t> m_issued;
     std::vector<Elite> m_elites;
 };
 
