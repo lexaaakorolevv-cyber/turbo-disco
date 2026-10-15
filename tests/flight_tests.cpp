@@ -100,6 +100,7 @@ int main() {
         auto next = search.next(2000);
         check(next == prefix(previous, search.guidanceFrom()), "Flight retry changed the successful prefix");
         check(search.guidanceFrom() < 700, "Flight retry did not roll back before death");
+        check(700 - search.guidanceFrom() >= 100, "Flight retry left no time for a sustained correction");
         check(search.next(0).empty(), "Empty search horizon underflow");
         std::cout << "Ship/wave guidance, long holds, reversed gravity, mini, reverse travel, prefix and input replay: PASS\n";
     } catch (std::exception const& e) {

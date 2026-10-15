@@ -213,6 +213,10 @@ std::vector<Action> Search::next(Tick limit) {
     Tick window = std::min<Tick>(m_window * (1 + m_stale / 48), 2400);
     Tick death = std::min(parent.deathTick, limit - 1);
     Tick back = 1 + ((generation / 8) * 37) % window;
+    // Flight failures often require a sustained climb or early braking, not a
+    // change on the last tick. Re-plan at least half a second where the
+    // configured mutation window permits it.
+    if (parent.flight) back = std::min(window, std::max<Tick>(back, 120));
     Tick start = death > back ? death - back : 0;
     if (generation % 8 == 7) { // Random wider rollback, including previously useful clicks.
         start = death > window ? death - window : 0;
