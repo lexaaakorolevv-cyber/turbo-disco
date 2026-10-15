@@ -16,5 +16,5 @@ struct GroundDecision {
     double passiveSurvival = 0, jumpDelay = -1;
 };
 GroundDecision chooseGroundInput(GroundObservation const& state, std::span<Obstacle const> objects,
-    double timingBias = 0);
+    double timingBias = 0, Forecast* forecast = nullptr);
 }

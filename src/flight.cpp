@@ -1,4 +1,5 @@
 #include "flight.hpp"
+#include "intelligence.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -19,9 +20,11 @@ namespace {
 struct Node {
     double y, vy, cost, wait;
     bool held, first;
+    int trace = 0;
 };
 }
-bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle const> obstacles, FlightTuning tuning) {
+bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle const> obstacles, FlightTuning tuning, Forecast* forecast, FailureMemory const* failures) {
+    if (forecast) *forecast = {};
     if (!std::isfinite(s.x) || !std::isfinite(s.y) || !std::isfinite(s.vy) ||
         !std::isfinite(s.vx) || !std::isfinite(s.bottom) || !std::isfinite(s.top) ||
         s.top <= s.bottom + 2 * s.halfHeight) return s.held;
@@ -39,7 +42,8 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
     auto targetAt = [&](double sampleX) {
         std::vector<std::pair<double, double>> blocked;
         for (auto const& o : obstacles) {
-            auto span = verticalSpan(o, sampleX, rx);
+            auto predicted = obstacleAt(o, std::abs(s.vx) > 1e-6 ? std::abs((sampleX - s.x) / s.vx) : 0);
+            auto span = verticalSpan(predicted, sampleX, rx);
             if (span && span->second + ry > low && span->first - ry < high)
                 blocked.emplace_back(std::max(low, span->first - ry), std::min(high, span->second + ry));
         }
@@ -73,6 +77,10 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
     double sign = s.inverted ? -1. : 1.;
     double minVelocity = (s.inverted ? -8. : -6.4) / mini;
     double maxVelocity = (s.inverted ? 6.4 : 8.) / mini;
+    struct TraceNode { Point point; int parent; };
+    std::vector<TraceNode> tree;
+    if (forecast) tree.push_back({{s.x,s.y},-1});
+    int bestTrace = 0;
     std::vector<Node> beam{{s.y, s.vy, 0, s.pressRemaining, s.held, s.held}}, next;
     beam.reserve(Width); next.reserve(2 * Width);
     bool answer = !s.held && s.pressRemaining > 0 ? false :
@@ -97,26 +105,33 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
             child.held = down;
             if (s.mode == FlightMode::Wave) {
                 // Wave changes direction immediately; mini wave has 2:1 slope.
-                child.vy = std::abs(s.vx) * (s.scale < .9 ? 2 : 1) * sign * (down ? 1 : -1);
+                child.vy = std::abs(s.vx) * (s.scale < .9 ? 2 : 1) * sign * (down ? 1 : -1) * s.slopeScale;
                 child.y = node.y + child.vy * segment;
             } else {
                 bool falling = node.vy * sign < 0;
+                int branch = (down ? 0 : 2) + (falling ? 1 : 0);
                 double acceleration = down ? (falling ? .4791 : .3833) : -(falling ? .3066 : .4599);
-                child.vy = std::clamp(node.vy + sign * acceleration * s.gravity * segment / mini, minVelocity, maxVelocity);
+                child.vy = std::clamp(node.vy + sign * acceleration * s.accelerationScales[branch] * s.gravity * segment / mini, minVelocity, maxVelocity);
                 child.y = node.y + (node.vy + child.vy) * segment / 2;
             }
             if (child.y < low || child.y > high) continue;
             bool collision = false;
             for (auto const& obstacle : obstacles)
-                if (sweptOverlap(x1, node.y, x2, child.y, rx, ry, obstacle)) { collision = true; break; }
+                if (forecastOverlap(x1, node.y, x2, child.y, rx, ry, obstacle, time, time + segment)) { collision = true; break; }
             if (collision) continue;
             // A small height error is preferable to continuous correction.
             double error = std::max(0., std::abs(child.y - localTarget) - 6.);
             child.cost += (error * error * .001 + child.vy * child.vy * .06) * segment / 2 +
                 (down != node.held ? (s.mode == FlightMode::Wave ? .25 : 2.) : 0);
+            if (failures) {
+                FormState state; state.form = wave ? Form::Wave : Form::Ship; state.x=x2; state.y=child.y;
+                state.vy=child.vy; state.scale=s.scale; state.inverted=s.inverted;
+                child.cost += failures->penalty(state,down)*segment;
+            }
+            if (forecast) {tree.push_back({{x2,child.y},node.trace});child.trace=static_cast<int>(tree.size()-1);}
             next.push_back(child);
         }
-        if (next.empty()) break; // Keep the input with the longest safe forecast.
+        if (next.empty()) { if (forecast) forecast->collision=Point{x2,beam.front().y}; break; } // // Keep the input with the longest safe forecast.
         std::stable_sort(next.begin(), next.end(), [](Node const& a, Node const& b) { return a.cost < b.cost; });
         // Keep diverse height/velocity states so a cheap coasting path cannot
         // crowd all early braking/avoidance candidates out of the beam.
@@ -130,7 +145,12 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
             if (beam.size() == Width) break;
         }
         answer = beam.front().first;
+        bestTrace = beam.front().trace;
         time += segment;
+    }
+    if (forecast) {
+        for(int i=bestTrace;i>=0;i=tree[i].parent)forecast->path.push_back(tree[i].point);
+        std::reverse(forecast->path.begin(),forecast->path.end());forecast->down=answer;forecast->survival=time;
     }
     return answer;
 }

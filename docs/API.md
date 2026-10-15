@@ -45,3 +45,11 @@ Geode UI и файловые API проверены по [исходникам S
 Контроллер полёта 1.1.0 читает `m_isShip`, `m_isDart`, `m_isUpsideDown`, `m_isGoingLeft`, `m_isSideways`, `m_vehicleSize`, `m_gravityMod`, `m_yVelocity`. Декорации и no-touch/passable/disabled/group-disabled объекты исключаются; невидимые коллизии учитываются. Считывание прямоугольников не заменяет штатные коллизии игры. Прогноз — локальная математика над числами, без вызовов `update` над копиями уровня и без восстановления игрового состояния.
 
 Официальная версия игры и требования toolchain видны в [CMakeLists.txt SDK](https://github.com/geode-sdk/geode/blob/v5.11.1/CMakeLists.txt). Bindings загружаются отдельно с закреплённым commit, чтобы дальнейшее изменение `bindings/main` не меняло API уже выпущенного исходного проекта.
+
+## Дополнения адаптера 1.6.0
+
+В тех же закреплённых bindings проверены поля `m_isBall`, `m_isBird`, `m_isRobot`, `m_isSpider`, `m_isSwing`, `m_yStart`, `m_gravity`, `m_touchedPad`, `m_touchedRing`, `m_touchedGravityPortal`, `m_isOnSlope`, `m_touchingRings`, `m_touchedRings`, `m_uniqueID`, `m_objectID` и `EffectGameObject::m_isReverse`.
+
+Для Windows используются реальные `GJBaseGameLayer::getBumpMod(PlayerObject*, int)` и `GameObject::isFacingDown()`. В ARM64-адаптере для этих двух функций применены локальные приближённые коэффициенты/направление по rotation, поскольку соответствующие определения отличаются по платформе. Положение, границы и обычный ввод по-прежнему получаются из настоящей игры. Предсказатель не вызывает `ringJump`, `spiderTestJump`, `flipGravity` и не присваивает состояние настоящего игрока.
+
+Траектория рисуется настоящим cocos `CCDrawNode::create/clear/drawSegment/drawDot`; координаты проходят `CCNode::convertToWorldSpace/convertToNodeSpace` через родителя игрока и HUD. Калибровка измеряет числа между штатными шагами, не патчит физику и не заменяет native update.

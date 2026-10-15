@@ -253,6 +253,14 @@ Search::Elite const& Search::best() const {
     if (m_elites.empty()) throw std::logic_error("No observed attempts");
     return m_elites.front();
 }
+void Search::preferTiming(int direction) {
+    if(!direction)return;
+    std::stable_sort(m_focusEdits.begin(),m_focusEdits.end(),[&](auto const&a,auto const&b){
+        bool preferredA=a.delta*direction>0,preferredB=b.delta*direction>0;
+        if(preferredA!=preferredB)return preferredA;
+        return std::abs(a.delta)<std::abs(b.delta);
+    });
+}
 bool Search::issue(std::vector<Action> const& actions) {
     std::uint64_t hash = 1469598103934665603ULL;
     auto mix = [&](std::uint64_t v) { hash = (hash ^ v) * 1099511628211ULL; };

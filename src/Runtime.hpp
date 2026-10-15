@@ -3,13 +3,14 @@
 #include "flight.hpp"
 #include "input.hpp"
 #include "ground.hpp"
+#include "planner.hpp"
 #include <Geode/Geode.hpp>
 #include <chrono>
 #include <memory>
 #include <optional>
 
 namespace rf {
-enum class Mode { Idle, Recording, Searching, Verifying, Playing };
+enum class Mode { Idle, Recording, Searching, Assisting, Verifying, Playing };
 
 class Runtime {
 public:
@@ -28,6 +29,13 @@ public:
     void resumeOverlay(PauseLayer* pause, EndLevelLayer* end);
     void startSearch();
     void startRecording();
+    void takeControl();
+    void returnToBot();
+    bool assisting() const { return m_mode == Mode::Assisting; }
+    void togglePreview() { m_showPreview = !m_showPreview; }
+    bool showPreview() const { return m_showPreview && m_mode == Mode::Searching; }
+    Forecast const& forecast() const { return m_forecast; }
+    PlayLayer* layer() const { return m_layer; }
     void play();
     void stop(std::string reason = "Остановлено пользователем");
     void save();
@@ -37,7 +45,7 @@ public:
     bool beforeTick(float dt, bool halfTick, bool lastTick);
     bool advanceOuterUpdate();
     bool humanInput(bool down, int button, bool inputSide);
-    void died();
+    void died(GameObject* object = nullptr);
     bool completed(); // Whether to call native levelComplete.
     void unexpectedReset();
     std::string summary() const;
@@ -77,6 +85,21 @@ private:
     InputPacer m_inputPacer;
     std::vector<FlightObstacle> m_flightObstacles;
     double m_spawnFloor = 90;
+    Calibration m_calibration;
+    FailureMemory m_failures;
+    MotionTracker m_motion;
+    FormState m_observation;
+    Forecast m_forecast;
+    std::vector<Interaction> m_interactions;
+    std::uint64_t m_inputEdges = 0;
+    double m_robotTime = 0, m_observationTime = -1;
+    bool m_showPreview = true;
+    std::string m_guidanceNote, m_lastFailure;
+    FormState readState(PlayerObject* player) const;
+    void updateIntelligence(PlayerObject* player);
+    void collectInteractions(double minX, double maxX, double minY, double maxY);
+    void rememberFailure(GameObject* object);
+
     std::string unsupported() const;
     std::string readinessError() const;
     nlohmann::json environment() const;

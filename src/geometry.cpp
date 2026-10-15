@@ -85,4 +85,17 @@ std::optional<std::pair<double, double>> verticalSpan(Obstacle const& o, double 
     if (low > high) return {};
     return std::pair{low, high};
 }
+Obstacle obstacleAt(Obstacle const& object, double time) {
+    auto o=object; double dt=std::clamp(time,0.,object.motionHorizon);
+    double dx=o.vx*dt,dy=o.vy*dt;
+    o.left+=dx; o.right+=dx; o.bottom+=dy; o.top+=dy;
+    for(int i=0;i<o.vertexCount;++i){o.vertices[i].x+=dx;o.vertices[i].y+=dy;}
+    return o;
+}
+bool forecastOverlap(double x1,double y1,double x2,double y2,double rx,double ry,
+    Obstacle const& o,double start,double end) {
+    double a=std::clamp(start,0.,o.motionHorizon),b=std::clamp(end,0.,o.motionHorizon);
+    return sweptOverlap(x1-o.vx*a,y1-o.vy*a,x2-o.vx*b,y2-o.vy*b,rx,ry,o);
+}
+
 }

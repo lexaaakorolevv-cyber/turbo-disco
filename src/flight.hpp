@@ -3,6 +3,7 @@
 #include "geometry.hpp"
 
 namespace rf {
+class FailureMemory;
 using FlightObstacle = Obstacle;
 enum class FlightMode { Ship, Wave };
 struct FlightObservation {
@@ -11,6 +12,8 @@ struct FlightObservation {
     double bottom = 0, top = 300;
     double scale = 1;
     double gravity = 1;
+    std::array<double,4> accelerationScales{1,1,1,1};
+    double slopeScale = 1;
     // Native 60 Hz units until another rising edge, and press-to-press
     // interval. Releasing is always allowed, including a one-tick tap.
     double pressRemaining = 0, pressInterval = 0;
@@ -27,5 +30,6 @@ FlightTuning flightTuning(unsigned long long attempt, unsigned long long seed);
 // Only proposes an input. This approximate, bounded beam search never advances
 // or restores Geometry Dash. The live game judges the resulting attempt.
 bool chooseFlightInput(FlightObservation const& state,
-    std::span<FlightObstacle const> obstacles, FlightTuning tuning = {});
+    std::span<FlightObstacle const> obstacles, FlightTuning tuning = {}, Forecast* forecast = nullptr,
+    FailureMemory const* failures = nullptr);
 }

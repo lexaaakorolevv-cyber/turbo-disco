@@ -3,6 +3,7 @@
 #include <Geode/ui/Popup.hpp>
 #include <Geode/ui/NineSlice.hpp>
 #include <algorithm>
+#include <Geode/cocos/draw_nodes/CCDrawNode.h>
 
 using namespace geode::prelude;
 
@@ -25,6 +26,7 @@ class Menu final : public Popup {
     Ref<PauseLayer> m_pause;
     Ref<EndLevelLayer> m_end;
     float m_statusHeight = 0;
+    std::vector<CCMenuItemSpriteExtra*> m_primary, m_extra;
     bool initMenu(PauseLayer* pause, EndLevelLayer* end) {
         auto viewport = CCDirector::sharedDirector()->getWinSize();
         auto geometry = panelGeometry(viewport.width, viewport.height);
@@ -49,6 +51,7 @@ class Menu final : public Popup {
             auto button = CCMenuItemSpriteExtra::create(bg, this, callback);
             button->setPosition(pos);
             m_buttonMenu->addChild(button);
+            m_primary.push_back(button);
         };
         auto row = [&](int i) { return geometry.firstRowY - i * geometry.rowSpacing; };
         add("Найти прохождение", {geometry.leftX, row(0)}, menu_selector(Menu::search));
@@ -56,7 +59,15 @@ class Menu final : public Popup {
         add("Сохранить макрос", {geometry.leftX, row(1)}, menu_selector(Menu::saveMacro));
         add("Загрузить макрос", {geometry.rightX, row(1)}, menu_selector(Menu::loadMacro));
         add("Воспроизвести", {geometry.leftX, row(2)}, menu_selector(Menu::playMacro));
-        add("Записать вручную", {geometry.rightX, row(2)}, menu_selector(Menu::record));
+        add("Дополнительно", {geometry.rightX, row(2)}, menu_selector(Menu::more));
+        auto primary = std::move(m_primary);m_primary.clear();
+        add("Записать вручную", {geometry.leftX,row(0)}, menu_selector(Menu::record));
+        add("Взять управление", {geometry.rightX,row(0)}, menu_selector(Menu::assist));
+        add("Вернуть боту", {geometry.leftX,row(1)}, menu_selector(Menu::giveBack));
+        add("Показать / скрыть путь", {geometry.rightX,row(1)}, menu_selector(Menu::path));
+        add("Назад", {geometry.leftX,row(2)}, menu_selector(Menu::back));
+        m_extra=std::move(m_primary);m_primary=std::move(primary);
+        for(auto b:m_extra){b->setVisible(false);b->setEnabled(false);}
         m_statusHeight = geometry.statusHeight;
         m_info = label("", 11, {geometry.width - 32.f, 0});
         m_info->setPosition({geometry.width / 2.f, geometry.statusY});
@@ -85,6 +96,12 @@ class Menu final : public Popup {
         Runtime::get().resumeOverlay(m_pause.data(), m_end.data());
         onClose(nullptr);
     }
+    void pages(bool extra){for(auto b:m_primary){b->setVisible(!extra);b->setEnabled(!extra);}for(auto b:m_extra){b->setVisible(extra);b->setEnabled(extra);}}
+    void more(CCObject*){pages(true);}
+    void back(CCObject*){pages(false);}
+    void assist(CCObject*){Runtime::get().takeControl();continueRun();}
+    void giveBack(CCObject*){Runtime::get().returnToBot();continueRun();}
+    void path(CCObject*){Runtime::get().togglePreview();}
     void search(CCObject*) { Runtime::get().startSearch(); continueRun(); }
     void stopSearch(CCObject*) { Runtime::get().stop(); }
     void saveMacro(CCObject*) { Runtime::get().save(); }
@@ -105,9 +122,12 @@ class Hud final : public CCNode {
     CCMenu* m_menu = nullptr;
     CCMenuItemSpriteExtra* m_open = nullptr;
     CCMenuItemSpriteExtra* m_stop = nullptr;
+    CCMenuItemSpriteExtra* m_help = nullptr;
+    CCDrawNode* m_draw = nullptr;
     CCSize m_viewport;
     void open(CCObject*) { showMenu(); }
     void stop(CCObject*) { Runtime::get().stop(); }
+    void help(CCObject*){auto&r=Runtime::get();if(r.assisting())r.returnToBot();else r.takeControl();}
     void update(float) override {
         // poll() also runs while the simulation is frozen in the custom menu.
         Runtime::get().poll();
@@ -118,7 +138,19 @@ class Hud final : public CCNode {
             m_menu->setContentSize(size);
             m_open->setPosition({size.width - 43, size.height - 60});
             m_stop->setPosition({size.width - 43, size.height - 90});
+            m_help->setPosition({size.width - 43, size.height - 120});
             m_status->setPosition({(size.width - 85) / 2.f, size.height - 52});
+        }
+        auto& runtime=Runtime::get();
+        m_draw->clear();
+        auto layer=runtime.layer();
+        if(runtime.showPreview()&&layer&&layer->m_player1&&layer->m_player1->getParent()){
+            auto parent=layer->m_player1->getParent();
+            auto screen=[&](Point p){return convertToNodeSpace(parent->convertToWorldSpace({static_cast<float>(p.x),static_cast<float>(p.y)}));};
+            auto const& trace=runtime.forecast();
+            ccColor4F green{.2f,.95f,.55f,.85f},red{1.f,.25f,.2f,.9f};
+            for(std::size_t i=1;i<trace.path.size()&&i<160;i++)m_draw->drawSegment(screen(trace.path[i-1]),screen(trace.path[i]),.8f,green);
+            if(trace.collision)m_draw->drawDot(screen(*trace.collision),3.f,red);
         }
         m_status->setString(Runtime::get().hudSummary().c_str());
         m_status->setScale(std::min(1.f, (size.width - 160.f) / std::max(1.f, m_status->getContentSize().width)));
@@ -142,6 +174,9 @@ public:
         hud->m_open = open;
         auto stop = CCMenuItemSpriteExtra::create(ButtonSprite::create("STOP", .45f), hud, menu_selector(Hud::stop));
         hud->m_stop = stop;
+        hud->m_help=CCMenuItemSpriteExtra::create(ButtonSprite::create("HELP",.45f),hud,menu_selector(Hud::help));
+        menu->addChild(hud->m_help);
+        hud->m_draw=CCDrawNode::create();hud->addChild(hud->m_draw,-1);
         menu->addChild(stop);
         hud->m_status = label("", 9);
         hud->addChild(hud->m_status);

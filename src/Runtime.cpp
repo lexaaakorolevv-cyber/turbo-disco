@@ -26,6 +26,8 @@ void Runtime::bind(PlayLayer* layer) {
     m_autosaveStatus.clear();
     m_autosaveDirty = m_autosaveUrgent = false;
     m_trial = {};
+    m_calibration = {}; m_failures = {}; m_motion.reset(); m_forecast = {};
+    m_guidanceNote.clear(); m_lastFailure.clear();
     m_status = "Готов. Только обычный режим, один игрок.";
     log::info("Route Finder {} attached to active level", ModVersion);
 }
@@ -150,6 +152,9 @@ bool Runtime::prepare() {
     m_tickLimit = MaxTicks;
     m_seed = mod->getSettingValue<int64_t>("search-seed");
     m_inputPacer.reset(SearchCps);
+    m_calibration = {}; m_failures = {}; m_motion.reset(); m_forecast = {};
+    m_showPreview = mod->getSettingValue<bool>("show-preview");
+    m_guidanceNote.clear(); m_lastFailure.clear();
     m_started = std::chrono::steady_clock::now();
     m_attempts = 0;
     m_previousAttempts = 0;
@@ -192,7 +197,7 @@ void Runtime::startSearch() {
     m_plan = m_search->next(m_tickLimit);
     m_flightFrom = m_search->guidanceFrom();
     m_restart = true;
-    m_status = "Поиск: куб + корабль + волна; лимит 16 CPS";
+    m_status = "Поиск: прогноз всех 8 форм; лимит 16 CPS";
     if (m_best && m_best->completed) {
         m_target = m_best;
         m_plan = m_best->actions;
@@ -243,145 +248,10 @@ void Runtime::inject(bool down) {
     m_layer->handleButton(down, 1, false);
     m_injecting = false;
     m_held = down;
+    ++m_inputEdges;
     appendAction(m_trial.actions, m_tick, down);
 }
 
-void Runtime::collectObstacles(double minX, double maxX, double minY, double maxY) {
-    m_flightObstacles.clear();
-    if (m_layer->m_objects) for (auto object : CCArrayExt<GameObject*>(m_layer->m_objects)) {
-        auto type = object->m_objectType;
-        if (type != GameObjectType::Solid && type != GameObjectType::Breakable && type != GameObjectType::Hazard &&
-            type != GameObjectType::AnimatedHazard && type != GameObjectType::Slope) continue;
-        if (object->m_isDisabled || object->m_isGroupDisabled || object->m_isNoTouch || object->m_isPassable) continue;
-        auto rect = object->getObjectRect();
-        FlightObstacle obstacle{rect.getMinX(), rect.getMaxX(), rect.getMinY(), rect.getMaxY()};
-        obstacle.solid = type == GameObjectType::Solid || type == GameObjectType::Breakable ||
-            (type == GameObjectType::Slope && !object->m_slopeIsHazard);
-        if (object->m_objectRadius > 0) {
-            double radius = object->getObjectRadius();
-            double cx = (obstacle.left + obstacle.right) / 2, cy = (obstacle.bottom + obstacle.top) / 2;
-            obstacle = {cx - radius, cx + radius, cy - radius, cy + radius, obstacle.solid, radius};
-        } else if (type == GameObjectType::Slope) {
-            // Native helpers identify the two flat sides of the right triangle.
-            double x = object->slopeWallLeft() ? obstacle.left : obstacle.right;
-            double y = object->slopeFloorTop() ? obstacle.top : obstacle.bottom;
-            obstacle.vertexCount = 3;
-            obstacle.vertices = {Point{x, y}, Point{x == obstacle.left ? obstacle.right : obstacle.left, y},
-                Point{x, y == obstacle.bottom ? obstacle.top : obstacle.bottom}, Point{}};
-        } else if (object->m_shouldUseOuterOb) {
-            // The real native oriented box supplies transformed world corners.
-            if (auto box = object->getOrientedBox()) {
-                Point center{};
-                bool valid = true;
-                for (int i = 0; i < 4; ++i) {
-                    auto p = box->m_corners[i];
-                    valid = valid && std::isfinite(p.x) && std::isfinite(p.y);
-                    obstacle.vertices[i] = {p.x, p.y}; center.x += p.x / 4.; center.y += p.y / 4.;
-                }
-                // If another mod changes corner semantics, retain the native
-                // rectangle instead of using unrecognised local coordinates.
-                if (valid && std::abs(center.x - rect.getMidX()) < rect.size.width + 2 &&
-                    std::abs(center.y - rect.getMidY()) < rect.size.height + 2) {
-                    std::sort(obstacle.vertices.begin(), obstacle.vertices.end(), [&](Point a, Point b) {
-                        return std::atan2(a.y - center.y, a.x - center.x) < std::atan2(b.y - center.y, b.x - center.x);
-                    });
-                    double area = 0;
-                    for (int i = 0; i < 4; ++i) {
-                        auto a = obstacle.vertices[i], b = obstacle.vertices[(i + 1) % 4];
-                        area += a.x * b.y - a.y * b.x;
-                    }
-                    if (std::abs(area) > .001) {
-                        obstacle.vertexCount = 4;
-                        obstacle.left = obstacle.right = obstacle.vertices[0].x;
-                        obstacle.bottom = obstacle.top = obstacle.vertices[0].y;
-                        for (auto p : obstacle.vertices) {
-                            obstacle.left = std::min(obstacle.left, p.x); obstacle.right = std::max(obstacle.right, p.x);
-                            obstacle.bottom = std::min(obstacle.bottom, p.y); obstacle.top = std::max(obstacle.top, p.y);
-                        }
-                    }
-                }
-            }
-        }
-        if (!std::isfinite(obstacle.left) || !std::isfinite(obstacle.right) || !std::isfinite(obstacle.bottom) ||
-            !std::isfinite(obstacle.top) || obstacle.right < minX || obstacle.left > maxX ||
-            obstacle.top < minY || obstacle.bottom > maxY) continue;
-        m_flightObstacles.push_back(obstacle);
-    }
-    if (m_flightObstacles.size() > 512) {
-        double x = m_layer->m_player1->getPositionX();
-        std::stable_sort(m_flightObstacles.begin(), m_flightObstacles.end(), [&](auto const& a, auto const& b) {
-            return std::abs((a.left + a.right) / 2 - x) < std::abs((b.left + b.right) / 2 - x);
-        });
-        m_flightObstacles.resize(512);
-    }
-}
-
-void Runtime::guideFlight(PlayerObject* player) {
-    bool cube = !player->m_isShip && !player->m_isDart && !player->m_isBird && !player->m_isBall &&
-        !player->m_isRobot && !player->m_isSpider && !player->m_isSwing && !player->m_isSideways && !player->m_isOnSlope;
-    int kind = player->m_isDart ? 2 : player->m_isShip ? 1 : cube ? 3 : 0;
-    if (!kind) {
-        // Release a controller-generated hold at a mode exit. Replayed prefix
-        // actions remain untouched because m_guidedFlight is false there.
-        if (m_guidedFlight) m_searchDesired = false;
-        m_guidedFlight = false;
-        return;
-    }
-    if (player->m_isDashing) return; // Keep the existing hold through a dash.
-    if (m_tick < m_flightFrom) return;
-    m_guidedFlight = true;
-    // Reconsider every native physics input tick. Reusing a decision for four
-    // ticks introduced enough delay to miss narrow mini-ship passages.
-    FlightObservation state;
-    state.mode = kind == 2 ? FlightMode::Wave : FlightMode::Ship;
-    state.x = player->getPositionX();
-    state.y = player->getPositionY();
-    state.vy = player->m_yVelocity;
-    state.vx = std::abs(player->getCurrentXVelocity()) * (player->m_isGoingLeft ? -1 : 1);
-    state.scale = player->m_vehicleSize;
-    state.gravity = std::clamp(static_cast<double>(std::abs(player->m_gravityMod)), .05, 10.);
-    state.inverted = player->m_isUpsideDown;
-    state.held = m_held;
-    state.pressRemaining = m_inputPacer.pressRemainingFrames(m_outerUpdates) / 4.;
-    state.pressInterval = m_inputPacer.pressIntervalFrames() / 4.;
-    auto playerRect = player->getObjectRect();
-    state.halfWidth = std::clamp(static_cast<double>(playerRect.size.width) / 2, 2., 50.);
-    state.halfHeight = std::clamp(static_cast<double>(playerRect.size.height) / 2, 2., 50.);
-    state.bottom = m_layer->getMinPortalY();
-    state.top = m_layer->getMaxPortalY();
-    if (!std::isfinite(state.bottom) || !std::isfinite(state.top) ||
-        state.top - state.bottom < 2 * state.halfHeight + 8 ||
-        state.y < state.bottom - 30 || state.y > state.top + 30 || m_layer->m_gameState.m_isFreeMode) {
-        // Free camera / portal transitions: a local proposal window, never a
-        // claim that these are the exact native collision boundaries.
-        state.bottom = state.y - 150;
-        state.top = state.y + 150;
-    }
-    double reach = std::abs(state.vx) * 76 + state.halfWidth;
-    double minX = state.x + std::min(0., state.vx < 0 ? -reach : reach) - state.halfWidth;
-    double maxX = state.x + std::max(0., state.vx < 0 ? -reach : reach) + state.halfWidth;
-    if (kind == 3) {
-        collectObstacles(minX, maxX, std::min(m_spawnFloor, state.y - 500), state.y + 700);
-        GroundObservation ground{state.x, state.y, state.vy, state.vx, state.halfWidth, state.halfHeight,
-            player->m_isUpsideDown ? 1e6 : m_spawnFloor,
-            std::abs(player->m_yStart) * (player->m_vehicleSize < .9 ? .8 : 1),
-            std::abs(player->m_gravity * player->m_gravityMod), m_inputPacer.remainingFrames(m_outerUpdates) / 4.,
-            player->m_isOnGround, player->m_isUpsideDown, m_held};
-        ground.pressRemaining = state.pressRemaining;
-        ground.pressInterval = state.pressInterval;
-        static constexpr double timing[]{0, -.25, .25, -.5, .5, -1, 1, -1.5, 1.5, -2, 2};
-        auto policy = m_search ? m_search->policy() : 0;
-        auto decision = chooseGroundInput(ground, m_flightObstacles, timing[policy % 11]);
-        m_searchDesired = decision.down;
-        if (!ground.grounded && player->m_touchingRings && player->m_touchingRings->count() &&
-            !m_held && (decision.passiveSurvival < 20 || policy % 4 == 1)) m_searchDesired = true;
-        return;
-    }
-    collectObstacles(minX, maxX, state.bottom, state.top);
-    auto down = chooseFlightInput(state, m_flightObstacles, flightTuning((m_search ? m_search->policy() : 0) + 1, m_seed));
-    // No pulse timeout: holding can continue for seconds or a whole section.
-    m_searchDesired = down;
-}
 
 void Runtime::beginAttempt() {
     releaseInput();
@@ -417,6 +287,8 @@ void Runtime::beginAttempt() {
     m_searchDesired = false;
     m_inputPacer.reset(m_inputPacer.limit());
     m_flightObstacles.clear();
+    m_motion.reset(); m_calibration.resetSampling(); m_forecast = {};
+    m_observationTime = -1; m_robotTime = 0; m_inputEdges = 0;
     m_trialPercent = 0;
     m_accumulator = 0;
     ++m_attempts;
@@ -432,7 +304,7 @@ Macro Runtime::snapshot(bool complete) const {
     result.verified = false;
     result.attempts = m_attempts;
     result.searchSeed = m_seed;
-    result.searchMaxCps = m_target ? m_target->searchMaxCps : m_mode == Mode::Searching ? m_inputPacer.limit() : 0;
+    result.searchMaxCps = m_target ? m_target->searchMaxCps : (m_mode == Mode::Searching || m_mode == Mode::Assisting) ? m_inputPacer.limit() : 0;
     return result;
 }
 void Runtime::remember(Macro const& macro) {
@@ -470,6 +342,7 @@ void Runtime::writeBest() {
 void Runtime::stop(std::string reason) {
     if (!active()) { m_status = std::move(reason); return; }
     if (!m_restart && m_tick) remember(snapshot());
+    if (m_mode == Mode::Assisting) { m_plan=prefix(m_trial.actions,m_tick); m_flightFrom=m_tick; }
     m_status = std::move(reason);
     m_runElapsed = elapsedSeconds();
     m_mode = Mode::Idle;
@@ -530,10 +403,11 @@ bool Runtime::beforeTick(float dt, bool halfTick, bool lastTick) {
         }
     }
     auto p = m_layer->m_player1;
-    if (m_mode == Mode::Searching && (p->m_isShip || p->m_isDart) && p->m_isSideways) {
-        stop("Поворот гравитации на 90° для корабля/волны пока не поддерживается");
+    if ((m_mode == Mode::Searching || m_mode == Mode::Assisting) && p->m_isSideways) {
+        stop("Поворот физической оси на 90° пока не поддерживается");
         return false;
     }
+    if (m_mode == Mode::Searching || m_mode == Mode::Assisting) updateIntelligence(p);
     auto flags = static_cast<unsigned>(p->m_isOnGround) | (p->m_isUpsideDown << 1) |
         (p->m_isShip << 2) | (p->m_isBird << 3) | (p->m_isBall << 4) | (p->m_isDart << 5) |
         (p->m_isRobot << 6) | (p->m_isSpider << 7) | (p->m_isSwing << 8) |
@@ -550,8 +424,9 @@ bool Runtime::beforeTick(float dt, bool halfTick, bool lastTick) {
         m_trial.trace.push_back(sample);
     }
     m_trial.timings.push_back({dt, halfTick, lastTick});
-    if (m_mode == Mode::Recording) {
-        if (m_pendingHuman != m_held) inject(m_pendingHuman);
+    if (m_mode == Mode::Recording || m_mode == Mode::Assisting) {
+        bool desired = m_mode == Mode::Assisting ? m_inputPacer.apply(m_pendingHuman, m_outerUpdates) : m_pendingHuman;
+        if (desired != m_held) inject(desired);
     } else if (m_cursor < m_plan.size() && m_plan[m_cursor].tick == m_tick) {
         auto down = m_plan[m_cursor++].down;
         if (m_mode == Mode::Searching) m_searchDesired = down;
@@ -583,17 +458,21 @@ bool Runtime::humanInput(bool down, int button, bool /*inputSide*/) {
     if (!active()) return !m_menuOpen;
     // Two-player and dual levels are rejected, so either mouse/keyboard side
     // is the same P1 jump. Never infer player numbering from a binding's name.
-    if (m_mode == Mode::Recording && button == 1 && !m_menuOpen)
+    if ((m_mode == Mode::Recording || m_mode == Mode::Assisting) && button == 1 && !m_menuOpen)
         m_pendingHuman = down;
     return false; // No physical input can contaminate search or replay queues.
 }
-void Runtime::died() {
+void Runtime::died(GameObject* object) {
     if (!active() || m_restart) return;
     auto trial = snapshot();
     remember(trial);
-    if (m_mode == Mode::Searching) {
+    if (m_mode == Mode::Searching || m_mode == Mode::Assisting) {
+        rememberFailure(object);
+        m_mode = Mode::Searching;
         auto player = m_layer->m_player1;
         m_search->observe(trial.actions, trial.ticks, trial.bestPercent, player && (player->m_isShip || player->m_isDart));
+        auto timing = m_failures.timingBias(m_observation);
+        m_search->preferTiming(timing > 0 ? -1 : timing < 0 ? 1 : 0);
         m_plan = m_search->next(m_tickLimit);
         m_flightFrom = m_search->guidanceFrom();
         m_restart = true;
@@ -610,13 +489,13 @@ void Runtime::failReplay(std::string const& why) {
 bool Runtime::completed() {
     if (!active()) return true;
     if (m_restart) return false;
-    if (m_mode == Mode::Searching || m_mode == Mode::Recording) {
+    if (m_mode == Mode::Searching || m_mode == Mode::Assisting || m_mode == Mode::Recording) {
         auto candidate = snapshot(true);
         if (!candidate.ticks) { stop("Завершение без физической попытки"); return false; }
         remember(candidate);
         m_target = candidate;
         m_plan = candidate.actions;
-        m_verifyingSearch = m_mode == Mode::Searching;
+        m_verifyingSearch = m_mode == Mode::Searching || m_mode == Mode::Assisting;
         m_mode = Mode::Verifying;
         m_restart = true;
         m_status = "Кандидат найден. Полная проверка с начала без чекпоинтов";
@@ -694,13 +573,15 @@ std::string Runtime::summary() const {
     }
     return fmt::format("Попыток: {} / {}   Лучший: {:.2f}%\nОсталось: {}м {}с | {}\n{}{}{}",
         m_attempts, m_budget.maxAttempts, best, remaining / 60, remaining % 60, phase, m_status,
-        m_autosaveStatus.empty() ? "" : "\n", m_autosaveStatus);
+        m_autosaveStatus.empty() ? "" : "\n", m_autosaveStatus) +
+        fmt::format("\n{} | Калибровка: {} | Память ошибок: {}", m_guidanceNote, m_calibration.samples(), m_failures.size());
 }
 std::string Runtime::hudSummary() const {
     char const* state = "Готов";
     switch (m_mode) {
         case Mode::Recording: state = "Запись"; break;
         case Mode::Searching: state = "Поиск"; break;
+        case Mode::Assisting: state = "Помощь игрока (16 CPS)"; break;
         case Mode::Verifying: state = "Проверка"; break;
         case Mode::Playing: state = "Повтор"; break;
         case Mode::Idle: break;
@@ -708,11 +589,7 @@ std::string Runtime::hudSummary() const {
     double best = std::max(m_best ? m_best->bestPercent : 0., m_trialPercent);
     std::string flight;
     if (m_mode == Mode::Searching && levelReady()) {
-        auto p = m_layer->m_player1;
-        if (p->m_isShip || p->m_isDart)
-            flight = fmt::format(" | {}: {}", p->m_isDart ? "Волна" : "Корабль", m_held ? "ЗАЖИМ" : "отпущено");
-        else if (!p->m_isBird && !p->m_isBall && !p->m_isRobot && !p->m_isSpider && !p->m_isSwing)
-            flight = fmt::format(" | Куб: {}", m_held ? "прыжок" : "бег");
+        flight = fmt::format(" | {}: {}", formName(m_observation.form), m_held ? "ЗАЖИМ" : "отпущено");
         flight += fmt::format(" | {}/16 CPS", m_inputPacer.currentCps());
     }
     return fmt::format("RF {} | {}{}\nПопыток: {} | Лучший: {:.1f}%", ModVersion, state, flight, m_attempts, best);

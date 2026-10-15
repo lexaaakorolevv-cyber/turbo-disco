@@ -71,7 +71,7 @@ class $modify(RouteFinderPlayLayer, PlayLayer) {
         auto wasDead = m_player1 && m_player1->m_isDead;
         PlayLayer::destroyPlayer(player, object);
         if (!wasDead && m_player1 && m_player1->m_isDead && rf::Runtime::get().owns(this))
-            rf::Runtime::get().died();
+            rf::Runtime::get().died(object);
     }
     void levelComplete() {
         auto& runtime = rf::Runtime::get();

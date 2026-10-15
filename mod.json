@@ -6,7 +6,7 @@
     },
     "id": "local.routefinder",
     "name": "Route Finder",
-    "version": "v1.5.0",
+    "version": "v1.6.0",
     "developer": "Route Finder contributors",
     "description": "Physics-tick recorder, replay verifier and bounded single-player route search.",
     "settings": {
@@ -49,6 +49,12 @@
             "type": "bool",
             "name": "Resume saved search",
             "description": "Find route restores this level search session when compatible. Disable to start a fresh search. Every attempt still starts from the beginning.",
+            "default": true
+        },
+        "show-preview": {
+            "type": "bool",
+            "name": "Show forecast path",
+            "description": "Approximate planned path and predicted blocked point. Native GD decides actual collisions.",
             "default": true
         }
     }
