@@ -1,4 +1,5 @@
 #include "core.hpp"
+#include "ui_geometry.hpp"
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -28,6 +29,17 @@ Macro fixture() {
 }
 int main() {
     try {
+        for (auto viewport : {std::pair{320.f, 240.f}, {426.f, 320.f}, {568.f, 320.f},
+                {854.f, 480.f}, {1920.f, 1080.f}, {2560.f, 1080.f}}) {
+            auto g = panelGeometry(viewport.first, viewport.second);
+            check(g.width + 40 <= viewport.first && g.height + 32 <= viewport.second, "Popup outside viewport");
+            check(g.leftX - g.buttonWidth / 2 > 0 && g.rightX + g.buttonWidth / 2 < g.width,
+                "Buttons outside panel");
+            float lastButtonBottom = g.firstRowY - 2 * g.rowSpacing - g.buttonHeight / 2;
+            check(g.statusY + g.statusHeight / 2 <= lastButtonBottom - 9, "Status overlaps buttons");
+            check(g.statusY - g.statusHeight / 2 >= 29, "Status overlaps footer");
+            check(g.firstRowY + g.buttonHeight / 2 < g.titleY - 10, "Buttons overlap title");
+        }
         auto m = fixture();
         auto j = toJson(m);
         check(toJson(fromJson(j)) == j, "JSON roundtrip changed macro");

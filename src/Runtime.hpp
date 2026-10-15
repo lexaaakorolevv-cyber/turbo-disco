@@ -12,6 +12,8 @@ class Runtime {
 public:
     static Runtime& get();
     void bind(PlayLayer* layer);
+    bool syncActiveLayer();
+    bool levelReady() const;
     void unbind(PlayLayer* layer);
     bool active() const { return m_mode != Mode::Idle; }
     bool owns(GJBaseGameLayer* layer) const { return layer == m_layer; }
@@ -36,6 +38,7 @@ public:
     bool completed(); // Whether to call native levelComplete.
     void unexpectedReset();
     std::string summary() const;
+    std::string hudSummary() const;
     std::string const& status() const { return m_status; }
     double& accumulator() { return m_accumulator; }
 private:
@@ -60,6 +63,7 @@ private:
     std::vector<Action> m_plan;
     std::unique_ptr<Search> m_search;
     std::string unsupported() const;
+    std::string readinessError() const;
     nlohmann::json environment() const;
     bool prepare();
     void beginAttempt();

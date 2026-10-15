@@ -12,8 +12,12 @@ namespace {
 void addOverlayMenu(CCNode* parent, CCObject* target, SEL_MenuHandler callback) {
     auto menu = CCMenu::create();
     auto size = CCDirector::sharedDirector()->getWinSize();
-    menu->setPosition({size.width - 45, size.height - 48});
+    menu->ignoreAnchorPointForPosition(false);
+    menu->setAnchorPoint({0, 0});
+    menu->setPosition({0, 0});
+    menu->setContentSize(size);
     auto button = CCMenuItemSpriteExtra::create(ButtonSprite::create("BOT", .6f), target, callback);
+    button->setPosition({size.width - 45, size.height - 48});
     menu->addChild(button);
     parent->addChild(menu, 10000);
 }
@@ -30,7 +34,7 @@ class $modify(RouteFinderPauseLayer, PauseLayer) {
 class $modify(RouteFinderEndLevelLayer, EndLevelLayer) {
     void customSetup() {
         EndLevelLayer::customSetup();
-        addOverlayMenu(m_mainLayer, this, menu_selector(RouteFinderEndLevelLayer::openBot));
+        addOverlayMenu(this, this, menu_selector(RouteFinderEndLevelLayer::openBot));
     }
     void openBot(CCObject*) { rf::showMenu(nullptr, this); }
 };
@@ -41,8 +45,17 @@ class $modify(RouteFinderPlayLayer, PlayLayer) {
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
         if (!PlayLayer::init(level, useReplay, dontCreateObjects)) return false;
         rf::Runtime::get().bind(this);
-        rf::attachHud(this);
         return true;
+    }
+    void setupHasCompleted() {
+        PlayLayer::setupHasCompleted();
+        rf::Runtime::get().bind(this);
+        rf::attachHud(this);
+    }
+    void onEnterTransitionDidFinish() {
+        PlayLayer::onEnterTransitionDidFinish();
+        rf::Runtime::get().bind(this);
+        rf::attachHud(this);
     }
     void resetLevel() {
         auto& runtime = rf::Runtime::get();
@@ -85,9 +98,16 @@ class $modify(RouteFinderGameLayer, GJBaseGameLayer) {
     }
     void update(float dt) {
         auto& runtime = rf::Runtime::get();
+        // Also recover when init/setup hooks ran before the layer became the
+        // GameManager's current PlayLayer. Never bind an editor/game preview.
+        auto current = PlayLayer::get();
+        if (current && static_cast<GJBaseGameLayer*>(current) == this) {
+            runtime.bind(current);
+            rf::attachHud(current);
+        }
         if (!runtime.owns(this)) { GJBaseGameLayer::update(dt); return; }
         runtime.service();
-        if (runtime.frozen()) return;
+        if (runtime.frozen() && runtime.levelReady()) return;
         if (!runtime.active()) { GJBaseGameLayer::update(dt); return; }
         auto play = PlayLayer::get();
         if (!play || play->m_isPaused) { runtime.accumulator() = 0; return; }

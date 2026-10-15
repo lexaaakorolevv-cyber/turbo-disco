@@ -11,6 +11,7 @@ using namespace geode::prelude;
 namespace rf {
 Runtime& Runtime::get() { static Runtime runtime; return runtime; }
 void Runtime::bind(PlayLayer* layer) {
+    if (!layer || m_layer == layer) return;
     if (m_layer && m_layer != layer) unbind(m_layer);
     m_layer = layer;
     m_best.reset();
@@ -20,6 +21,35 @@ void Runtime::bind(PlayLayer* layer) {
     m_trialPercent = 0;
     m_trial = {};
     m_status = "Готов. Только обычный режим, один игрок.";
+    log::info("Route Finder {} attached to active level", ModVersion);
+}
+bool Runtime::levelReady() const {
+    return m_layer && m_layer == PlayLayer::get() && m_layer->m_level &&
+        m_layer->m_levelSettings && m_layer->m_player1;
+}
+std::string Runtime::readinessError() const {
+    if (!m_layer || m_layer != PlayLayer::get()) return "Активный PlayLayer не найден. Откройте уровень заново.";
+    if (!m_layer->m_level) return "Игра ещё создаёт данные уровня. Закройте меню и подождите.";
+    if (!m_layer->m_levelSettings) return "Игра ещё создаёт настройки уровня. Закройте меню и подождите.";
+    if (!m_layer->m_player1) return "Игрок P1 ещё не создан. Закройте меню и подождите.";
+    return {};
+}
+bool Runtime::syncActiveLayer() {
+    // init() can finish before the asynchronous level setup, and this mod's
+    // pause/end menu can outlive an earlier init/onExit notification.
+    // Resolve the actual current layer at the point of use, not just at init.
+    auto current = PlayLayer::get();
+    if (current) {
+        auto menuOpen = m_menuOpen;
+        bind(current);
+        m_menuOpen = menuOpen;
+    }
+    if (levelReady()) return true;
+    m_status = readinessError();
+    log::warn("Route Finder {}: {}; current={}, bound={}, level={}, settings={}, player1={}",
+        ModVersion, m_status, current != nullptr, m_layer != nullptr,
+        current && current->m_level, current && current->m_levelSettings, current && current->m_player1);
+    return false;
 }
 void Runtime::unbind(PlayLayer* layer) {
     if (m_layer != layer) return;
@@ -45,8 +75,7 @@ void Runtime::resumeOverlay(PauseLayer* pause, EndLevelLayer* end) {
 }
 
 std::string Runtime::unsupported() const {
-    if (!m_layer || !m_layer->m_levelSettings || !m_layer->m_player1)
-        return "Уровень ещё не загружен";
+    if (!levelReady()) return readinessError();
     auto s = m_layer->m_levelSettings;
     if (m_layer->m_isPlatformer || s->m_platformerMode) return "Platformer не поддерживается";
     if (s->m_twoPlayerMode || m_layer->m_level->m_twoPlayerMode) return "Два игрока не поддерживаются";
@@ -102,6 +131,7 @@ nlohmann::json Runtime::environment() const {
 
 bool Runtime::prepare() {
     if (active()) { m_status = "Сначала остановите текущую операцию"; return false; }
+    if (!syncActiveLayer()) return false;
     auto error = unsupported();
     if (!error.empty()) { m_status = error; return false; }
     m_environment = environment();
@@ -420,6 +450,7 @@ void Runtime::unexpectedReset() {
 
 void Runtime::save() {
     if (active()) { m_status = "Остановите операцию перед ручным сохранением"; return; }
+    if (!syncActiveLayer()) return;
     try {
         if (m_selected && m_selected->verified) {
             saveMacro(macroPath(false), *m_selected);
@@ -432,6 +463,7 @@ void Runtime::save() {
 }
 void Runtime::load() {
     if (active()) { m_status = "Остановите операцию перед загрузкой"; return; }
+    if (!syncActiveLayer()) return;
     try {
         auto path = macroPath(false);
         if (!std::filesystem::exists(path) && !std::filesystem::exists(path.string() + ".bak")) path = macroPath(true);
@@ -449,5 +481,17 @@ std::string Runtime::summary() const {
     double best = m_best ? m_best->bestPercent : 0;
     best = std::max(best, m_trialPercent);
     return fmt::format("Попыток: {} / {}   Лучший: {:.2f}%\n{}", m_attempts, m_budget.maxAttempts, best, m_status);
+}
+std::string Runtime::hudSummary() const {
+    char const* state = "Готов";
+    switch (m_mode) {
+        case Mode::Recording: state = "Запись"; break;
+        case Mode::Searching: state = "Поиск"; break;
+        case Mode::Verifying: state = "Проверка"; break;
+        case Mode::Playing: state = "Повтор"; break;
+        case Mode::Idle: break;
+    }
+    double best = std::max(m_best ? m_best->bestPercent : 0., m_trialPercent);
+    return fmt::format("RF {} | {}\nПопыток: {} | Лучший: {:.1f}%", ModVersion, state, m_attempts, best);
 }
 }
