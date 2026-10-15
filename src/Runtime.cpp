@@ -164,13 +164,15 @@ void Runtime::startSearch() {
     if (!prepare()) return;
     m_search = std::make_unique<Search>(m_seed, Mod::get()->getSettingValue<int64_t>("mutation-window"));
     if (m_selected && m_selected->environment == m_environment) {
-        m_search->observe(m_selected->actions, m_selected->ticks, m_selected->bestPercent);
+        bool flight = !m_selected->trace.empty() && (m_selected->trace.back().flags & ((1u << 2) | (1u << 5)));
+        m_search->observe(m_selected->actions, m_selected->ticks, m_selected->bestPercent, flight);
         m_best = m_selected;
     }
     m_mode = Mode::Searching;
     m_plan = m_search->next(m_tickLimit);
+    m_flightFrom = m_search->guidanceFrom();
     m_restart = true;
-    m_status = "Поиск: каждая попытка начинается с нуля";
+    m_status = "Поиск: куб + корабль + волна; удержания без ограничения импульсом";
 }
 void Runtime::play() {
     if (!m_selected) { m_status = "Сначала загрузите или найдите макрос"; return; }
@@ -216,6 +218,80 @@ void Runtime::inject(bool down) {
     appendAction(m_trial.actions, m_tick, down);
 }
 
+void Runtime::guideFlight(PlayerObject* player) {
+    int kind = player->m_isDart ? 2 : player->m_isShip ? 1 : 0;
+    if (!kind) {
+        // Release a controller-generated hold at a mode exit. Replayed prefix
+        // actions remain untouched because m_guidedFlight is false there.
+        if (m_guidedFlight && m_held) inject(false);
+        m_guidedFlight = false;
+        return;
+    }
+    if (player->m_isDashing) return; // Keep the existing hold through a dash.
+    if (m_tick < m_flightFrom) return;
+    m_guidedFlight = true;
+    // Reconsider every native physics input tick. Reusing a decision for four
+    // ticks introduced enough delay to miss narrow mini-ship passages.
+    FlightObservation state;
+    state.mode = kind == 2 ? FlightMode::Wave : FlightMode::Ship;
+    state.x = player->getPositionX();
+    state.y = player->getPositionY();
+    state.vy = player->m_yVelocity;
+    state.vx = std::abs(player->getCurrentXVelocity()) * (player->m_isGoingLeft ? -1 : 1);
+    state.scale = player->m_vehicleSize;
+    state.gravity = std::clamp(static_cast<double>(std::abs(player->m_gravityMod)), .05, 10.);
+    state.inverted = player->m_isUpsideDown;
+    state.held = m_held;
+    auto playerRect = player->getObjectRect();
+    state.halfWidth = std::clamp(static_cast<double>(playerRect.size.width) / 2, 2., 50.);
+    state.halfHeight = std::clamp(static_cast<double>(playerRect.size.height) / 2, 2., 50.);
+    state.bottom = m_layer->getMinPortalY();
+    state.top = m_layer->getMaxPortalY();
+    if (!std::isfinite(state.bottom) || !std::isfinite(state.top) ||
+        state.top - state.bottom < 2 * state.halfHeight + 8 ||
+        state.y < state.bottom - 30 || state.y > state.top + 30 || m_layer->m_gameState.m_isFreeMode) {
+        // Free camera / portal transitions: a local proposal window, never a
+        // claim that these are the exact native collision boundaries.
+        state.bottom = state.y - 150;
+        state.top = state.y + 150;
+    }
+    m_flightObstacles.clear();
+    double reach = std::abs(state.vx) * 56 + state.halfWidth;
+    double minX = state.x + std::min(0., state.vx < 0 ? -reach : reach) - state.halfWidth;
+    double maxX = state.x + std::max(0., state.vx < 0 ? -reach : reach) + state.halfWidth;
+    if (m_layer->m_objects) for (auto object : CCArrayExt<GameObject*>(m_layer->m_objects)) {
+        auto type = object->m_objectType;
+        if (type != GameObjectType::Solid && type != GameObjectType::Breakable && type != GameObjectType::Hazard &&
+            type != GameObjectType::AnimatedHazard && type != GameObjectType::Slope) continue;
+        if (object->m_isDisabled || object->m_isGroupDisabled || object->m_isNoTouch || object->m_isPassable) continue;
+        // Invisible collision objects still count. getObjectRect returns the
+        // current transformed box, including movement already applied by GD.
+        auto rect = object->getObjectRect();
+        FlightObstacle obstacle{rect.getMinX(), rect.getMaxX(), rect.getMinY(), rect.getMaxY()};
+        if (object->m_objectRadius > 0) {
+            double radius = object->m_objectRadius;
+            double cx = (obstacle.left + obstacle.right) / 2, cy = (obstacle.bottom + obstacle.top) / 2;
+            obstacle = {std::min(obstacle.left, cx - radius), std::max(obstacle.right, cx + radius),
+                std::min(obstacle.bottom, cy - radius), std::max(obstacle.top, cy + radius)};
+        }
+        if (!std::isfinite(obstacle.left) || !std::isfinite(obstacle.right) || !std::isfinite(obstacle.bottom) ||
+            !std::isfinite(obstacle.top) || obstacle.right < minX || obstacle.left > maxX ||
+            obstacle.top < state.bottom || obstacle.bottom > state.top) continue;
+        m_flightObstacles.push_back(obstacle);
+    }
+    // Bound planning cost even in very dense levels. Actual collisions are
+    // always resolved by the game; the forecast is only a search heuristic.
+    if (m_flightObstacles.size() > 512) {
+        std::stable_sort(m_flightObstacles.begin(), m_flightObstacles.end(), [&](auto const& a, auto const& b) {
+            return std::abs((a.left + a.right) / 2 - state.x) < std::abs((b.left + b.right) / 2 - state.x);
+        });
+        m_flightObstacles.resize(512);
+    }
+    auto down = chooseFlightInput(state, m_flightObstacles, flightTuning(m_attempts, m_seed));
+    // No pulse timeout: holding can continue for seconds or a whole section.
+    if (down != m_held) inject(down);
+}
+
 void Runtime::beginAttempt() {
     releaseInput();
     // delayedResetLevel has no float argument and is not a schedule selector.
@@ -242,6 +318,8 @@ void Runtime::beginAttempt() {
     m_outerUpdates = 0;
     m_cursor = 0;
     m_traceCursor = 0;
+    m_guidedFlight = false;
+    m_flightObstacles.clear();
     m_trialPercent = 0;
     m_accumulator = 0;
     ++m_attempts;
@@ -347,6 +425,10 @@ bool Runtime::beforeTick(float dt, bool halfTick, bool lastTick) {
         }
     }
     auto p = m_layer->m_player1;
+    if (m_mode == Mode::Searching && (p->m_isShip || p->m_isDart) && p->m_isSideways) {
+        stop("Поворот гравитации на 90° для корабля/волны пока не поддерживается");
+        return false;
+    }
     auto flags = static_cast<unsigned>(p->m_isOnGround) | (p->m_isUpsideDown << 1) |
         (p->m_isShip << 2) | (p->m_isBird << 3) | (p->m_isBall << 4) | (p->m_isDart << 5) |
         (p->m_isRobot << 6) | (p->m_isSpider << 7) | (p->m_isSwing << 8) |
@@ -368,6 +450,9 @@ bool Runtime::beforeTick(float dt, bool halfTick, bool lastTick) {
     } else if (m_cursor < m_plan.size() && m_plan[m_cursor].tick == m_tick) {
         inject(m_plan[m_cursor++].down);
     }
+    // Verification and replay consume only saved actions; they must never
+    // make a fresh decision from the obstacle forecast.
+    if (m_mode == Mode::Searching) guideFlight(p);
     ++m_tick; // Count consumed input boundaries, including the eventual death tick.
     m_trialPercent = std::max(m_trialPercent, static_cast<double>(std::clamp(m_layer->getCurrentPercent(), 0.f, 100.f)));
     return true;
@@ -396,8 +481,10 @@ void Runtime::died() {
     auto trial = snapshot();
     remember(trial);
     if (m_mode == Mode::Searching) {
-        m_search->observe(trial.actions, trial.ticks, trial.bestPercent);
+        auto player = m_layer->m_player1;
+        m_search->observe(trial.actions, trial.ticks, trial.bestPercent, player && (player->m_isShip || player->m_isDart));
         m_plan = m_search->next(m_tickLimit);
+        m_flightFrom = m_search->guidanceFrom();
         m_restart = true;
     } else if (m_mode == Mode::Verifying || m_mode == Mode::Playing) {
         failReplay(fmt::format("Смерть при повторе на тике {}", m_tick));
@@ -492,6 +579,12 @@ std::string Runtime::hudSummary() const {
         case Mode::Idle: break;
     }
     double best = std::max(m_best ? m_best->bestPercent : 0., m_trialPercent);
-    return fmt::format("RF {} | {}\nПопыток: {} | Лучший: {:.1f}%", ModVersion, state, m_attempts, best);
+    std::string flight;
+    if (m_mode == Mode::Searching && levelReady()) {
+        auto p = m_layer->m_player1;
+        if (p->m_isShip || p->m_isDart)
+            flight = fmt::format(" | {}: {}", p->m_isDart ? "Волна" : "Корабль", m_held ? "ЗАЖИМ" : "отпущено");
+    }
+    return fmt::format("RF {} | {}{}\nПопыток: {} | Лучший: {:.1f}%", ModVersion, state, flight, m_attempts, best);
 }
 }

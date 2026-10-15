@@ -185,8 +185,8 @@ std::vector<Action> prefix(std::vector<Action> const& actions, Tick end) {
 }
 
 Search::Search(std::uint64_t seed, Tick window) : m_rng(seed), m_window(std::clamp<Tick>(window, 8, 2400)) {}
-void Search::observe(std::vector<Action> const& actions, Tick death, double percent) {
-    auto candidate = Elite{prefix(actions, death), death, percent};
+void Search::observe(std::vector<Action> const& actions, Tick death, double percent, bool flight) {
+    auto candidate = Elite{prefix(actions, death), death, percent, flight};
     bool improvement = m_elites.empty() || percent > m_elites.front().percent + 1e-6 ||
         (std::abs(percent - m_elites.front().percent) <= 1e-6 && death > m_elites.front().deathTick);
     m_stale = improvement ? 0 : m_stale + 1;
@@ -205,6 +205,8 @@ Search::Elite const& Search::best() const {
     return m_elites.front();
 }
 std::vector<Action> Search::next(Tick limit) {
+    m_guidanceFrom = 0;
+    if (!limit) return {};
     if (m_elites.empty()) return {}; // First attempt establishes the no-input frontier.
     auto generation = m_generation++;
     auto const& parent = m_elites[(generation % 7 == 6) ? m_rng() % m_elites.size() : 0];
@@ -217,14 +219,22 @@ std::vector<Action> Search::next(Tick limit) {
         start += m_rng() % (death - start + 1);
     }
     auto result = prefix(parent.actions, start);
-    static constexpr Tick holds[]{1, 4, 8, 16, 32, 64, 128};
+    if (parent.flight) {
+        // Keep the successful flight exactly until the rollback boundary.
+        // Re-plan the ship/wave tail with a new policy and unrestricted holds.
+        m_guidanceFrom = start;
+        return result;
+    }
+    static constexpr Tick holds[]{1, 4, 8, 16, 32, 64, 128, 240, 480, 960};
     if (generation % 8 != 7) {
         // Enumerate a pulse or release before the collision, preserving the
         // exact earlier prefix. A held parent is also explored as a release.
         bool initial = heldBefore(result, start);
         appendAction(result, start, !initial);
-        auto end = start + holds[generation % 7];
-        if (end < limit) appendAction(result, end, initial);
+        auto end = start + holds[(generation % 7 + generation / 56) % 10];
+        // Every seventh candidate keeps holding/releasing until the end. A
+        // long climb must never be capped by the old 128-tick pulse limit.
+        if (generation % 8 != 6 && end < limit) appendAction(result, end, initial);
     } else {
         auto end = std::min<Tick>(limit, death + 480);
         bool down = heldBefore(result, start);
@@ -233,6 +243,7 @@ std::vector<Action> Search::next(Tick limit) {
             appendAction(result, t, down);
         }
     }
+    m_guidanceFrom = std::max(start, result.empty() ? Tick{0} : result.back().tick + 1);
     return result;
 }
 

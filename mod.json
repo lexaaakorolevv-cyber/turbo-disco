@@ -3,7 +3,7 @@
     "gd": { "win": "2.2081", "android": "2.2081" },
     "id": "local.routefinder",
     "name": "Route Finder",
-    "version": "v1.0.1",
+    "version": "v1.1.0",
     "developer": "Route Finder contributors",
     "description": "Physics-tick recorder, replay verifier and bounded single-player route search.",
     "settings": {

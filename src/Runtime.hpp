@@ -1,5 +1,6 @@
 #pragma once
 #include "core.hpp"
+#include "flight.hpp"
 #include <Geode/Geode.hpp>
 #include <chrono>
 #include <memory>
@@ -62,6 +63,9 @@ private:
     std::optional<Macro> m_best, m_selected, m_target;
     std::vector<Action> m_plan;
     std::unique_ptr<Search> m_search;
+    Tick m_flightFrom = 0;
+    bool m_guidedFlight = false;
+    std::vector<FlightObstacle> m_flightObstacles;
     std::string unsupported() const;
     std::string readinessError() const;
     nlohmann::json environment() const;
@@ -69,6 +73,7 @@ private:
     void beginAttempt();
     void releaseInput();
     void inject(bool down);
+    void guideFlight(PlayerObject* player);
     Macro snapshot(bool complete = false) const;
     void remember(Macro const& macro);
     void writeBest();

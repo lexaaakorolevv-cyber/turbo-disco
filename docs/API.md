@@ -29,6 +29,10 @@ PlayLayer::destroyPlayer(PlayerObject*, GameObject*);
 PlayLayer::levelComplete();
 PlayLayer::getCurrentPercent();
 PlayerObject::releaseAllButtons();
+PlayerObject::getCurrentXVelocity();
+GameObject::getObjectRect();
+GJBaseGameLayer::getMinPortalY();
+GJBaseGameLayer::getMaxPortalY();
 GameToolbox::fast_srand(uint64_t);
 ```
 
@@ -37,5 +41,7 @@ GameToolbox::fast_srand(uint64_t);
 Geode UI и файловые API проверены по [исходникам SDK v5.11.1](https://github.com/geode-sdk/geode/tree/v5.11.1/loader/include/Geode): `Popup::init`, `NineSlice::create`, `Mod::getSaveDir`, `Loader::getAllMods`, `VersionInfo::toVString`, `sha256`, cocos `CCLabelTTF`. Русские надписи рисуются системным TTF-шрифтом, поскольку штатные bitmap fonts не содержат всю кириллицу.
 
 `Popup::init` уже выравнивает `m_buttonMenu` через `CopySizeLayout`: его позицию нельзя обнулять при использовании координат окна. Постоянный HUD добавляется в настоящий `GJBaseGameLayer::m_uiLayer`. Активный уровень повторно берётся через `PlayLayer::get()` при открытии меню и запуске операций; `setupHasCompleted`, переход сцены и `update` страхуют привязку после асинхронной загрузки.
+
+Контроллер полёта 1.1.0 читает `m_isShip`, `m_isDart`, `m_isUpsideDown`, `m_isGoingLeft`, `m_isSideways`, `m_vehicleSize`, `m_gravityMod`, `m_yVelocity`. Декорации и no-touch/passable/disabled/group-disabled объекты исключаются; невидимые коллизии учитываются. Считывание прямоугольников не заменяет штатные коллизии игры. Прогноз — локальная математика над числами, без вызовов `update` над копиями уровня и без восстановления игрового состояния.
 
 Официальная версия игры и требования toolchain видны в [CMakeLists.txt SDK](https://github.com/geode-sdk/geode/blob/v5.11.1/CMakeLists.txt). Bindings загружаются отдельно с закреплённым commit, чтобы дальнейшее изменение `bindings/main` не меняло API уже выпущенного исходного проекта.

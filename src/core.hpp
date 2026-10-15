@@ -10,7 +10,7 @@
 namespace rf {
 using Tick = std::uint64_t;
 inline constexpr Tick MaxTicks = 240 * 1800;
-inline constexpr char ModVersion[] = "1.0.1";
+inline constexpr char ModVersion[] = "1.1.0";
 
 struct Action {
     Tick tick = 0;
@@ -61,24 +61,27 @@ bool heldBefore(std::vector<Action> const& actions, Tick tick);
 void appendAction(std::vector<Action>& actions, Tick tick, bool down);
 std::vector<Action> prefix(std::vector<Action> const& actions, Tick endExclusive);
 
-// Bounded elitist search over actual game attempts. There is no simulated game
-// model and no saved game state: each genome is replayed from a native reset.
+// Bounded elitist search scored only by actual game attempts. Each genome is
+// replayed from a native reset; forecasts never certify an elite or a success.
 class Search {
 public:
     struct Elite {
         std::vector<Action> actions;
         Tick deathTick = 0;
         double percent = 0;
+        bool flight = false;
     };
     Search(std::uint64_t seed, Tick window);
-    void observe(std::vector<Action> const& actions, Tick deathTick, double percent);
+    void observe(std::vector<Action> const& actions, Tick deathTick, double percent, bool flight = false);
     std::vector<Action> next(Tick maxTicks);
     Elite const& best() const;
     std::size_t size() const { return m_elites.size(); }
+    Tick guidanceFrom() const { return m_guidanceFrom; }
 private:
     std::mt19937_64 m_rng;
     Tick m_window;
     std::uint64_t m_generation = 0, m_stale = 0;
+    Tick m_guidanceFrom = 0;
     std::vector<Elite> m_elites;
 };
 
