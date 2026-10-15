@@ -141,7 +141,7 @@ bool Runtime::prepare() {
     m_outerLimit = 240 * mod->getSettingValue<int64_t>("max-attempt-seconds");
     m_tickLimit = MaxTicks;
     m_seed = mod->getSettingValue<int64_t>("search-seed");
-    m_inputPacer.reset(0);
+    m_inputPacer.reset(SearchCps);
     m_started = std::chrono::steady_clock::now();
     m_attempts = 0;
     m_oldCBS = m_layer->m_clickBetweenSteps;
@@ -173,7 +173,7 @@ void Runtime::startSearch() {
     m_plan = m_search->next(m_tickLimit);
     m_flightFrom = m_search->guidanceFrom();
     m_restart = true;
-    m_status = "Поиск: куб + корабль + волна; CPS без ограничений";
+    m_status = "Поиск: куб + корабль + волна; лимит 16 CPS";
 }
 void Runtime::play() {
     if (!m_selected) { m_status = "Сначала загрузите или найдите макрос"; return; }
@@ -315,8 +315,8 @@ void Runtime::guideFlight(PlayerObject* player) {
     state.gravity = std::clamp(static_cast<double>(std::abs(player->m_gravityMod)), .05, 10.);
     state.inverted = player->m_isUpsideDown;
     state.held = m_held;
-    state.holdRemaining = m_inputPacer.remainingFrames(m_outerUpdates) / 4.;
-    state.minHold = m_inputPacer.dwellFrames() / 4.;
+    state.pressRemaining = m_inputPacer.pressRemainingFrames(m_outerUpdates) / 4.;
+    state.pressInterval = m_inputPacer.pressIntervalFrames() / 4.;
     auto playerRect = player->getObjectRect();
     state.halfWidth = std::clamp(static_cast<double>(playerRect.size.width) / 2, 2., 50.);
     state.halfHeight = std::clamp(static_cast<double>(playerRect.size.height) / 2, 2., 50.);
@@ -338,8 +338,10 @@ void Runtime::guideFlight(PlayerObject* player) {
         GroundObservation ground{state.x, state.y, state.vy, state.vx, state.halfWidth, state.halfHeight,
             player->m_isUpsideDown ? 1e6 : m_spawnFloor,
             std::abs(player->m_yStart) * (player->m_vehicleSize < .9 ? .8 : 1),
-            std::abs(player->m_gravity * player->m_gravityMod), state.holdRemaining,
+            std::abs(player->m_gravity * player->m_gravityMod), m_inputPacer.remainingFrames(m_outerUpdates) / 4.,
             player->m_isOnGround, player->m_isUpsideDown, m_held};
+        ground.pressRemaining = state.pressRemaining;
+        ground.pressInterval = state.pressInterval;
         static constexpr double timing[]{0, -.25, .25, -.5, .5, -1, 1, -1.5, 1.5, -2, 2};
         auto policy = m_search ? m_search->policy() : 0;
         auto decision = chooseGroundInput(ground, m_flightObstacles, timing[policy % 11]);
@@ -661,7 +663,7 @@ std::string Runtime::hudSummary() const {
             flight = fmt::format(" | {}: {}", p->m_isDart ? "Волна" : "Корабль", m_held ? "ЗАЖИМ" : "отпущено");
         else if (!p->m_isBird && !p->m_isBall && !p->m_isRobot && !p->m_isSpider && !p->m_isSwing)
             flight = fmt::format(" | Куб: {}", m_held ? "прыжок" : "бег");
-        flight += fmt::format(" | {} CPS (без лимита)", m_inputPacer.currentCps());
+        flight += fmt::format(" | {}/16 CPS", m_inputPacer.currentCps());
     }
     return fmt::format("RF {} | {}{}\nПопыток: {} | Лучший: {:.1f}%", ModVersion, state, flight, m_attempts, best);
 }

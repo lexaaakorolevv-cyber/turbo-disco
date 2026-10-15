@@ -199,6 +199,27 @@ void Search::observe(std::vector<Action> const& actions, Tick death, double perc
     if (std::any_of(m_elites.begin(), m_elites.end(), [&](Elite const& e) {
         return e.actions == candidate.actions;
     })) return;
+    if (improvement && !candidate.actions.empty()) {
+        // A compact queue of edits shares one immutable parent; do not retain
+        // dozens of complete long-level macros just to shift a few ticks.
+        m_focusBase = candidate.actions;
+        m_focusDeath = death;
+        m_focusPolicy = m_policy;
+        m_focusEdits.clear();
+        unsigned pulses = 0;
+        for (std::size_t i = m_focusBase.size(); i-- > 0 && pulses < 4;) {
+            if (!m_focusBase[i].down) continue;
+            if (m_focusBase[i].tick + std::max<Tick>(m_window, 240) < death) break;
+            ++pulses;
+            std::size_t release = i + 1 < m_focusBase.size() ? i + 1 : i;
+            if (release == i) for (int beforeDeath : {1, 2, 4, 8, 16, 32, 64, 96, 128})
+                m_focusEdits.push_back({i, i, -beforeDeath, true});
+            for (int shift : {-1, 1, -2, 2, -4, 4, -8, 8, -16, 16, -32, 32}) {
+                m_focusEdits.push_back({i, release, shift}); // Move the whole hold.
+                if (release != i) m_focusEdits.push_back({release, release, shift}); // Adjust duration.
+            }
+        }
+    }
     m_elites.push_back(std::move(candidate));
     std::stable_sort(m_elites.begin(), m_elites.end(), [](Elite const& a, Elite const& b) {
         if (a.percent != b.percent) return a.percent > b.percent;
@@ -222,10 +243,45 @@ Search::Elite const& Search::best() const {
     if (m_elites.empty()) throw std::logic_error("No observed attempts");
     return m_elites.front();
 }
+bool Search::issue(std::vector<Action> const& actions) {
+    std::uint64_t hash = 1469598103934665603ULL;
+    auto mix = [&](std::uint64_t v) { hash = (hash ^ v) * 1099511628211ULL; };
+    mix(m_guidanceFrom); mix(m_policy);
+    for (auto const& a : actions) { mix(a.tick); mix(a.down); }
+    if (m_issued.size() >= 8192) m_issued.clear();
+    return m_issued.insert(hash).second;
+}
 std::vector<Action> Search::next(Tick limit) {
     m_guidanceFrom = 0;
     if (!limit) return {};
     if (m_elites.empty()) { m_policy = 0; m_generation = 1; return {}; }
+    // Reserve one in four attempts for alternate policies / broader rollback.
+    // The other attempts optimize the current frontier before abandoning it.
+    if (m_choices++ % 4 != 0) while (!m_focusEdits.empty()) {
+        auto edit = m_focusEdits.front(); m_focusEdits.pop_front();
+        if (m_focusBase.empty() || m_focusBase.back().tick >= limit) continue;
+        if (edit.release) {
+            auto tick = static_cast<std::int64_t>(m_focusDeath) + edit.delta;
+            if (tick <= static_cast<std::int64_t>(m_focusBase.back().tick) || tick >= static_cast<std::int64_t>(limit)) continue;
+            auto result = m_focusBase;
+            appendAction(result, static_cast<Tick>(tick), false);
+            m_policy = m_focusPolicy;
+            m_guidanceFrom = std::min(limit, m_focusDeath + 1);
+            if (issue(result)) return result;
+            continue;
+        }
+        auto first = static_cast<std::int64_t>(m_focusBase[edit.first].tick) + edit.delta;
+        auto last = static_cast<std::int64_t>(m_focusBase[edit.last].tick) + edit.delta;
+        auto low = edit.first ? m_focusBase[edit.first - 1].tick + 1 : 0;
+        auto high = edit.last + 1 < m_focusBase.size() ? m_focusBase[edit.last + 1].tick - 1 : limit - 1;
+        if (first < static_cast<std::int64_t>(low) || last > static_cast<std::int64_t>(high)) continue;
+        auto result = m_focusBase;
+        for (auto i = edit.first; i <= edit.last; ++i)
+            result[i].tick = static_cast<Tick>(static_cast<std::int64_t>(result[i].tick) + edit.delta);
+        m_policy = m_focusPolicy;
+        m_guidanceFrom = std::min(limit, std::max(m_focusDeath + 1, result.back().tick + 1));
+        if (issue(result)) return result;
+    }
     std::vector<Action> result;
     for (int retry = 0; retry < 64; ++retry) {
         auto generation = m_generation++;
@@ -274,12 +330,7 @@ std::vector<Action> Search::next(Tick limit) {
             }
             m_guidanceFrom = result.empty() ? start : result.back().tick + 1;
         }
-        std::uint64_t hash = 1469598103934665603ULL;
-        auto mix = [&](std::uint64_t v) { hash = (hash ^ v) * 1099511628211ULL; };
-        mix(m_guidanceFrom); mix(m_policy);
-        for (auto const& a : result) { mix(a.tick); mix(a.down); }
-        if (m_issued.size() >= 8192) m_issued.clear();
-        if (m_issued.insert(hash).second) break;
+        if (issue(result)) break;
     }
     return result;
 }

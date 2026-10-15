@@ -9,6 +9,7 @@ struct GroundObservation {
     double jumpVelocity = 11.18, gravity = .9582;
     double holdRemaining = 0;
     bool grounded = true, inverted = false, held = false;
+    double pressInterval = 0, pressRemaining = 0;
 };
 struct GroundDecision {
     bool down = false;

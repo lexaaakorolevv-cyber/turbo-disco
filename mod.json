@@ -6,7 +6,7 @@
     },
     "id": "local.routefinder",
     "name": "Route Finder",
-    "version": "v1.3.0",
+    "version": "v1.4.0",
     "developer": "Route Finder contributors",
     "description": "Physics-tick recorder, replay verifier and bounded single-player route search.",
     "settings": {

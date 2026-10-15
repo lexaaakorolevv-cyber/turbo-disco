@@ -11,9 +11,9 @@ struct FlightObservation {
     double bottom = 0, top = 300;
     double scale = 1;
     double gravity = 1;
-    // Native 60 Hz units until the next allowed change, and minimum time to
-    // keep each future state. The planner must account for the input limiter.
-    double holdRemaining = 0, minHold = 0;
+    // Native 60 Hz units until another rising edge, and press-to-press
+    // interval. Releasing is always allowed, including a one-tick tap.
+    double pressRemaining = 0, pressInterval = 0;
     FlightMode mode = FlightMode::Ship;
     bool inverted = false, held = false;
 };

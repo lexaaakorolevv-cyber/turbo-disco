@@ -6,12 +6,13 @@
 #include <string>
 #include <vector>
 #include <unordered_set>
+#include <deque>
 #include <nlohmann/json.hpp>
 
 namespace rf {
 using Tick = std::uint64_t;
 inline constexpr Tick MaxTicks = 240 * 1800;
-inline constexpr char ModVersion[] = "1.3.0";
+inline constexpr char ModVersion[] = "1.4.0";
 
 struct Action {
     Tick tick = 0;
@@ -87,6 +88,12 @@ private:
     std::uint64_t m_generation = 0, m_stale = 0;
     Tick m_guidanceFrom = 0;
     std::uint64_t m_policy = 0;
+    struct FocusEdit { std::size_t first, last; int delta; bool release = false; };
+    std::deque<FocusEdit> m_focusEdits;
+    std::vector<Action> m_focusBase;
+    Tick m_focusDeath = 0;
+    std::uint64_t m_focusPolicy = 0, m_choices = 0;
+    bool issue(std::vector<Action> const& actions);
     std::unordered_set<std::uint64_t> m_issued;
     std::vector<Elite> m_elites;
 };

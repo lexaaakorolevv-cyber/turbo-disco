@@ -17,18 +17,18 @@ struct JumpNode {
 GroundDecision jumpSequence(GroundObservation const& s, std::span<Obstacle const> objects, double bias) {
     constexpr double Step = .5, Horizon = 52;
     constexpr std::size_t Width = 32;
-    std::vector<JumpNode> beam{{s.y, s.vy, s.holdRemaining, 1000, -1, 0, s.grounded, s.held, false}}, next;
+    std::vector<JumpNode> beam{{s.y, s.vy, s.pressRemaining, 1000, -1, 0, s.grounded, s.held, false}}, next;
     beam.reserve(Width); next.reserve(2 * Width);
     GroundDecision result;
     for (double t = 0; t < Horizon; t += Step) {
         next.clear();
         double oldX = s.x + s.vx * t, x = oldX + s.vx * Step;
         for (auto const& node : beam) for (bool down : {false, true}) {
-            if (node.wait > 1e-9 && down != node.held) continue;
+            if (down && !node.held && node.wait > 1e-9) continue;
             // Airborne presses have no cube effect; the runtime handles rings.
-            if (!node.grounded && down && node.wait <= 1e-9) continue;
+            if (!node.grounded && down) continue;
             auto child = node;
-            child.wait = std::max(0., node.wait - Step);
+            child.wait = std::max(0., (down && !node.held ? s.pressInterval : node.wait) - Step);
             child.held = down;
             if (t == 0) child.first = down;
             if (child.grounded && down) {
@@ -145,7 +145,7 @@ GroundDecision chooseGroundInput(GroundObservation const& input, std::span<Obsta
     }
     // Spend the larger branching budget only when one jump cannot clear the
     // horizon. Retain the simpler predictor on isolated obstacles.
-    if (bestScore < 52000 && s.holdRemaining == 0) {
+    if (bestScore < 52000) {
         auto sequence = jumpSequence(s, source, bias);
         if (sequence.passiveSurvival * 1000 > bestScore + .5) {
             answer.down = sequence.down;

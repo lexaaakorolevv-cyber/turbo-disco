@@ -31,6 +31,8 @@ void runCourse(double speed, double scale, bool inverted, bool reverse, bool pla
         GroundObservation s{x * direction, y * sign, vy * sign, speed * direction, half, half,
             floor * sign, 11.18 * (scale < .9 ? .8 : 1), .9582,
             pacer.remainingFrames(tick) / 4., grounded, inverted, held};
+        s.pressInterval = pacer.pressIntervalFrames() / 4.;
+        s.pressRemaining = pacer.pressRemainingFrames(tick) / 4.;
         bool down = pacer.apply(chooseGroundInput(s, objects).down, tick);
         if (down != held) appendAction(actions, tick, down);
         held = down;
@@ -75,16 +77,16 @@ int main() {
         check(!sweptOverlap(4, 4, 5, 5, 1, 1, circle), "Circle empty corner treated as wall");
         check(sweptOverlap(40, 40, 60, 60, 1, 1, circle), "Circle collision missed");
         int passed = 0;
-        for (int cps : {0, 8}) for (double speed : {4., 5.2, 6.6}) for (double scale : {1., .6})
+        for (int cps : {16}) for (double speed : {4., 5.2, 6.6}) for (double scale : {1., .6})
             for (bool inverted : {false, true}) for (bool reverse : {false, true}) {
                 runCourse(speed, scale, inverted, reverse, false, cps); ++passed;
             }
-        for (int cps : {0, 8}) for (bool inverted : {false, true}) for (bool reverse : {false, true}) {
+        for (int cps : {16}) for (bool inverted : {false, true}) for (bool reverse : {false, true}) {
             runCourse(5.2, 1, inverted, reverse, true, cps); ++passed;
         }
         for (bool inverted : {false, true}) for (bool reverse : {false, true}) {
-            runCourse(5.2, 1, inverted, reverse, false, 0, true); ++passed;
+            runCourse(5.2, 1, inverted, reverse, false, 16, true); ++passed;
         }
-        std::cout << passed << " cube obstacle/platform scenarios, uncapped and legacy 8 CPS; shape geometry: PASS\n";
+        std::cout << passed << " cube obstacle/platform scenarios, 16 CPS; shape geometry: PASS\n";
     } catch (std::exception const& error) { std::cerr << error.what() << '\n'; return 1; }
 }

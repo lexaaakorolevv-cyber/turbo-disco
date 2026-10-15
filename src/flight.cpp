@@ -64,7 +64,7 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
     // benefits from a stable anticipatory target rather than chasing each
     // local free-space centre.
     bool const wave = s.mode == FlightMode::Wave;
-    int const Width = wave ? 48 : 24;
+    int const Width = 64;
     int const Depth = wave ? 40 : 32;
     // Resolve imminent turns at the outer native 240 Hz step, then use longer
     // segments further away. The old uniform 1/2-unit forecast skipped short
@@ -73,9 +73,9 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
     double sign = s.inverted ? -1. : 1.;
     double minVelocity = (s.inverted ? -8. : -6.4) / mini;
     double maxVelocity = (s.inverted ? 6.4 : 8.) / mini;
-    std::vector<Node> beam{{s.y, s.vy, 0, s.holdRemaining, s.held, s.held}}, next;
+    std::vector<Node> beam{{s.y, s.vy, 0, s.pressRemaining, s.held, s.held}}, next;
     beam.reserve(Width); next.reserve(2 * Width);
-    bool answer = s.holdRemaining > 0 ? s.held :
+    bool answer = !s.held && s.pressRemaining > 0 ? false :
         ((target - s.y) - (s.mode == FlightMode::Ship ? s.vy * 8 : 0)) * sign > 0;
     double time = 0;
     for (int depth = 0; depth < Depth; ++depth) {
@@ -90,9 +90,9 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
         // climb starts before the wall without chasing an obsolete gap.
         double localTarget = wave ? targetAt(x2 + s.vx * 6) : target;
         for (auto const& node : beam) for (bool down : {false, true}) {
-            if (down != node.held && node.wait > 1e-9) continue;
+            if (down && !node.held && node.wait > 1e-9) continue;
             auto child = node;
-            child.wait = std::max(0., (down != node.held ? s.minHold : node.wait) - segment);
+            child.wait = std::max(0., (down && !node.held ? s.pressInterval : node.wait) - segment);
             child.first = depth == 0 ? down : node.first;
             child.held = down;
             if (s.mode == FlightMode::Wave) {
@@ -123,7 +123,7 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
         beam.clear();
         for (auto const& candidate : next) {
             bool duplicate = std::any_of(beam.begin(), beam.end(), [&](Node const& n) {
-                return n.first == candidate.first && std::abs(n.y - candidate.y) < 2 &&
+                return n.first == candidate.first && n.held == candidate.held && std::abs(n.y - candidate.y) < 2 &&
                     std::abs(n.vy - candidate.vy) < .4 && std::abs(n.wait - candidate.wait) < .25;
             });
             if (!duplicate) beam.push_back(candidate);

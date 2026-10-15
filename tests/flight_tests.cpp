@@ -60,13 +60,13 @@ void course(FlightMode mode, bool inverted, double scale, double direction) {
     auto initial = state;
     std::vector<Action> macro;
     InputPacer pacer;
-    pacer.reset(0);
+    pacer.reset(SearchCps);
     bool held = false;
     for (Tick tick = 0; tick < 900; ++tick) {
-        state.holdRemaining = pacer.remainingFrames(tick) / 4.;
-        state.minHold = pacer.dwellFrames() / 4.;
+        state.pressRemaining = pacer.pressRemainingFrames(tick) / 4.;
+        state.pressInterval = pacer.pressIntervalFrames() / 4.;
         bool down = pacer.apply(chooseFlightInput(state, objects), tick);
-        check(pacer.remainingFrames(tick) == 0, "Uncapped flight input was delayed");
+        check(pacer.currentCps() <= 16, "Flight exceeded 16 CPS");
         if (down != held) { appendAction(macro, tick, down); held = down; }
         advance(state, down);
         if (!safe(state, objects)) {
@@ -106,13 +106,13 @@ int main() {
         for (auto mode : {FlightMode::Ship, FlightMode::Wave}) {
             s = {}; s.mode = mode; s.y = 35; s.top = 1400;
             InputPacer pacer;
-            pacer.reset(0);
+            pacer.reset(SearchCps);
             Tick longest = 0, current = 0;
             for (int tick = 0; tick < 600; ++tick) {
-                s.holdRemaining = pacer.remainingFrames(tick) / 4.;
-                s.minHold = pacer.dwellFrames() / 4.;
+                s.pressRemaining = pacer.pressRemainingFrames(tick) / 4.;
+                s.pressInterval = pacer.pressIntervalFrames() / 4.;
                 bool down = pacer.apply(chooseFlightInput(s, {}), tick);
-                check(pacer.remainingFrames(tick) == 0, "Uncapped climb input was delayed");
+                check(pacer.currentCps() <= 16, "Climb exceeded 16 CPS");
                 current = down ? current + 1 : 0;
                 longest = std::max(longest, current);
                 advance(s, down);

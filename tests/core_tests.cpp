@@ -64,12 +64,12 @@ int main() {
                 check(uncapped.remainingFrames(frame) == 0 && uncapped.dwellFrames() == 0, "Uncapped input has a delay");
             }
             check(uncapped.currentCps() > 20, "CPS counter still imposes the old ceiling");
-            uncapped.reset();
+            uncapped.reset(0);
             check(uncapped.currentCps() == 0 && !uncapped.apply(false, 0), "Uncapped reset left stale input");
             m.searchMaxCps = 0;
             check(fromJson(toJson(m)).searchMaxCps == 0, "Uncapped macro provenance changed");
         }
-        for (int cps : {1, 3, 6, 8, 12, 20}) {
+        for (int cps : {1, 3, 6, 8, 12, 16, 20}) {
             InputPacer pacer;
             pacer.reset(cps);
             bool held = false;
@@ -97,6 +97,16 @@ int main() {
             for (Tick frame = 0; frame < 1200; ++frame)
                 check(pacer.apply(true, frame), "Limiter cut a sustained hold");
             check(!pacer.apply(false, 1200), "Release after a long hold was lost");
+        }
+        {
+            InputPacer pacer;
+            pacer.reset(SearchCps);
+            check(pacer.limit() == 16 && pacer.apply(true, 0), "16 CPS default missing");
+            check(!pacer.apply(false, 0), "Short tap release was delayed");
+            check(!pacer.apply(true, 14), "Second press passed before 1/16 second");
+            check(pacer.apply(true, 15), "Allowed 16 CPS press was blocked");
+            m.searchMaxCps = 16;
+            check(fromJson(toJson(m)).searchMaxCps == 16, "16 CPS provenance changed");
         }
         auto temp = std::filesystem::temp_directory_path() / "routefinder-core-tests" / "macro.json";
         saveMacro(temp, m);
