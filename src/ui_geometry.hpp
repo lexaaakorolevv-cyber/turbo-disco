@@ -7,9 +7,9 @@ struct PanelGeometry {
     float leftX, rightX, firstRowY, rowSpacing;
 };
 inline PanelGeometry panelGeometry(float viewportWidth, float viewportHeight) {
-    float width = std::min(420.f, viewportWidth - 40.f);
-    float height = std::min(296.f, viewportHeight - 32.f);
-    float buttonHeight = std::min(30.f, height * .11f);
+    float width = std::min(440.f, viewportWidth - 40.f);
+    float height = std::min(320.f, viewportHeight - 32.f);
+    float buttonHeight = std::min(32.f, height * .11f);
     float rowSpacing = buttonHeight + 10.f;
     float first = height - 64.f;
     float statusTop = first - 2 * rowSpacing - buttonHeight / 2.f - 10.f;

@@ -6,7 +6,7 @@
     },
     "id": "local.routefinder",
     "name": "Route Finder",
-    "version": "v1.6.0",
+    "version": "v1.7.0",
     "developer": "Route Finder contributors",
     "description": "Physics-tick recorder, replay verifier and bounded single-player route search.",
     "settings": {
@@ -55,6 +55,12 @@
             "type": "bool",
             "name": "Show forecast path",
             "description": "Approximate planned path and predicted blocked point. Native GD decides actual collisions.",
+            "default": true
+        },
+        "smooth-search": {
+            "type": "bool",
+            "name": "Smooth search",
+            "description": "Reuse the forecast within one native outer update; refresh immediately on form, gravity, landing and input changes. Disable for planning on every internal physics step. Recording and replay always keep every physics tick.",
             "default": true
         }
     }

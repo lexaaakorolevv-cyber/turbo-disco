@@ -6,6 +6,7 @@
 
 namespace rf {
 namespace {
+using Slices=std::array<std::vector<Obstacle>,104>;
 struct Outcome { double survival, clearance; bool jumped; };
 struct JumpNode {
     double y, vy, wait, clearance = 1000, firstJump = -1;
@@ -15,18 +16,23 @@ struct JumpNode {
 };
 // Preserve alternative landings and later takeoffs. A single-jump forecast
 // cannot distinguish a good first jump from one that blocks the next jump.
-GroundDecision jumpSequence(GroundObservation const& s, std::span<Obstacle const> objects, double bias, Forecast* output) {
+GroundDecision jumpSequence(GroundObservation const& s, std::span<Obstacle const> objects, double bias, Forecast* output, Slices const* slices=nullptr) {
     constexpr double Step = .5, Horizon = 52;
     constexpr std::size_t Width = 32;
     std::vector<JumpNode> beam{{s.y, s.vy, s.pressRemaining, 1000, -1, 0, s.grounded, s.held, false}}, next;
     beam.reserve(Width); next.reserve(2 * Width);
     struct TraceNode { Point point; int parent; };
     std::vector<TraceNode> tree; if (output) tree.push_back({{s.x,s.y},-1});
+    if(output)tree.reserve(1+Width*104*2);
+    std::vector<Obstacle> nearby;nearby.reserve(objects.size());
     int bestTrace=0;
     GroundDecision result;
     for (double t = 0; t < Horizon; t += Step) {
         next.clear();
         double oldX = s.x + s.vx * t, x = oldX + s.vx * Step;
+        std::span<Obstacle const> active;
+        if(slices)active=(*slices)[static_cast<std::size_t>(t/Step)];
+        else {horizontalCandidates(objects,oldX,x,s.halfWidth,t,t+Step,nearby);active=nearby;}
         for (auto const& node : beam) for (bool down : {false, true}) {
             if (down && !node.held && node.wait > 1e-9) continue;
             // Airborne presses have no cube effect; the runtime handles rings.
@@ -43,13 +49,13 @@ GroundDecision jumpSequence(GroundObservation const& s, std::span<Obstacle const
             child.y += child.vy * Step;
             double landing = -std::numeric_limits<double>::infinity();
             if (node.y - s.halfHeight >= s.floor - 1e-6 && child.y - s.halfHeight <= s.floor) landing = s.floor;
-            for (auto const& base : objects) { auto o=obstacleAt(base,t+Step); if (o.solid && x + s.halfWidth > o.left && x - s.halfWidth < o.right &&
+            for (auto const& base : active) { auto o=obstacleAt(base,t+Step); if (o.solid && x + s.halfWidth > o.left && x - s.halfWidth < o.right &&
                 child.vy <= 0 && node.y - s.halfHeight >= o.top - .1 && child.y - s.halfHeight <= o.top)
                 landing = std::max(landing, o.top); }
             child.grounded = std::isfinite(landing);
             if (child.grounded) { child.y = landing + s.halfHeight; child.vy = 0; }
             bool collision = false;
-            for (auto const& base : objects) {
+            for (auto const& base : active) {
                 auto o=obstacleAt(base,t+Step);
                 if (forecastOverlap(oldX, node.y, x, child.y, s.halfWidth, s.halfHeight - .05, base,t,t+Step)) {
                     collision = true; break;
@@ -84,7 +90,7 @@ GroundDecision jumpSequence(GroundObservation const& s, std::span<Obstacle const
         std::reverse(output->path.begin(),output->path.end());output->down=result.down;output->survival=result.passiveSurvival;}
     return result;
 }
-Outcome forecast(GroundObservation const& s, std::span<Obstacle const> objects, double delay, Forecast* output = nullptr) {
+Outcome forecast(GroundObservation const& s, std::span<Obstacle const> objects, double delay, Forecast* output = nullptr,Slices const* slices=nullptr) {
     constexpr double Step = .5, Horizon = 52;
     double x = s.x, y = s.y, vy = s.vy;
     bool grounded = s.grounded, jumped = false;
@@ -99,9 +105,10 @@ Outcome forecast(GroundObservation const& s, std::span<Obstacle const> objects, 
         x += s.vx * Step;
         if (!grounded) vy -= s.gravity * Step;
         y += vy * Step;
+        std::span<Obstacle const> active=slices?std::span<Obstacle const>((*slices)[static_cast<std::size_t>(t/Step)]):objects;
         double landing = -std::numeric_limits<double>::infinity();
         if (oldY - s.halfHeight >= s.floor - 1e-6 && y - s.halfHeight <= s.floor) landing = s.floor;
-        for (auto const& base : objects) {
+        for (auto const& base : active) {
             auto o=obstacleAt(base,t+Step);
             if (!o.solid || x + s.halfWidth <= o.left || x - s.halfWidth >= o.right) continue;
             if (vy <= 0 && oldY - s.halfHeight >= o.top - .1 && y - s.halfHeight <= o.top)
@@ -109,7 +116,7 @@ Outcome forecast(GroundObservation const& s, std::span<Obstacle const> objects, 
         }
         grounded = std::isfinite(landing);
         if (grounded) { y = landing + s.halfHeight; vy = 0; }
-        for (auto const& base : objects) {
+        for (auto const& base : active) {
             auto o=obstacleAt(base,t+Step);
             // Landing on a solid's top is legal; crossing its side is not.
             if (forecastOverlap(oldX, oldY, x, y, s.halfWidth, s.halfHeight - .05, base,t,t+Step)) {
@@ -124,7 +131,7 @@ Outcome forecast(GroundObservation const& s, std::span<Obstacle const> objects, 
         // infinite floor at the platform's height.
         if (grounded && landing > s.floor + .1) {
             bool supported = false;
-            for (auto const& base : objects) { auto o=obstacleAt(base,t+Step);
+            for (auto const& base : active) { auto o=obstacleAt(base,t+Step);
                 if (o.solid && std::abs(o.top - landing) < .1 && x + s.halfWidth > o.left && x - s.halfWidth < o.right)
                     supported = true;
             }
@@ -154,10 +161,17 @@ GroundDecision chooseGroundInput(GroundObservation const& input, std::span<Obsta
     auto passive = forecast(s, source, -1, output);
     GroundDecision answer{false, passive.survival, -1};
     if (!s.grounded || passive.survival >= 52) return answer;
+    Slices cache;Slices const* slices=nullptr;
+    if(source.size()>16){
+        for(std::size_t i=0;i<cache.size();i++){
+            double time=i*.5,x=s.x+s.vx*time;
+            horizontalCandidates(source,x,x+s.vx*.5,s.halfWidth,time,time+.5,cache[i]);
+        }slices=&cache;
+    }
     double bestScore = passive.survival * 1000 - 10;
     double earliest = s.held ? 0 : s.holdRemaining;
     for (double delay = earliest; delay <= std::min(36., passive.survival); delay += .5) {
-        auto outcome = forecast(s, source, delay);
+        auto outcome = forecast(s, source, delay,nullptr,slices);
         double score = outcome.survival * 1000 + std::clamp(outcome.clearance, -100., 100.) - delay * .002;
         if (score > bestScore) {
             bestScore = score;
@@ -167,10 +181,10 @@ GroundDecision chooseGroundInput(GroundObservation const& input, std::span<Obsta
     }
     // Spend the larger branching budget only when one jump cannot clear the
     // horizon. Retain the simpler predictor on isolated obstacles.
-    if(output)forecast(s,source,answer.jumpDelay,output);
+    if(output)forecast(s,source,answer.jumpDelay,output,slices);
     if (bestScore < 52000) {
         Forecast sequenceTrace;
-        auto sequence = jumpSequence(s, source, bias, output ? &sequenceTrace : nullptr);
+        auto sequence = jumpSequence(s, source, bias, output ? &sequenceTrace : nullptr,slices);
         if (sequence.passiveSurvival * 1000 > bestScore + .5) {
             answer.down = sequence.down;
             answer.jumpDelay = sequence.jumpDelay;

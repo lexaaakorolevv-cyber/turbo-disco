@@ -16,5 +16,5 @@ struct FormDecision {bool down=false;double survival=0;Forecast forecast;};
 bool advanceForm(FormState& state,bool down,double dt,std::span<Obstacle const> obstacles,
     std::span<Interaction const> interactions,std::uint64_t& used,double time=0);
 FormDecision chooseFormInput(FormState const& state,std::span<Obstacle const> obstacles,
-    std::span<Interaction const> interactions,FailureMemory const* failures=nullptr,double bias=0);
+    std::span<Interaction const> interactions,FailureMemory const* failures=nullptr,double bias=0,bool includeForecast=true);
 }

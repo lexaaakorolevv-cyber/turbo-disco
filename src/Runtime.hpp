@@ -4,6 +4,7 @@
 #include "input.hpp"
 #include "ground.hpp"
 #include "planner.hpp"
+#include "guidance_clock.hpp"
 #include <Geode/Geode.hpp>
 #include <chrono>
 #include <memory>
@@ -31,8 +32,18 @@ public:
     void startRecording();
     void takeControl();
     void returnToBot();
+    void toggleSmooth() {m_smoothSearch=!m_smoothSearch;m_guidanceClock.reset();geode::Mod::get()->setSettingValue<bool>("smooth-search",m_smoothSearch);}
+    bool searching() const {return m_mode==Mode::Searching||m_mode==Mode::Assisting;}
+    unsigned cps() const {return m_inputPacer.currentCps();}
+    bool smoothSearch() const {return m_smoothSearch;}
+    bool previewEnabled() const {return m_showPreview;}
+    double bestPercent() const {return std::max(m_trialPercent,m_best?m_best->bestPercent:0.);}
+    std::uint64_t attempts() const {return m_attempts;}
+    char const* modeName() const;
+    int remainingSeconds() const {return active()?static_cast<int>(std::max(0.,m_budget.maxSeconds-elapsedSeconds())):0;}
+    std::string detail() const {return m_status+(m_autosaveStatus.empty()?"":"\n"+m_autosaveStatus);}
     bool assisting() const { return m_mode == Mode::Assisting; }
-    void togglePreview() { m_showPreview = !m_showPreview; }
+    void togglePreview() { m_showPreview = !m_showPreview;geode::Mod::get()->setSettingValue<bool>("show-preview",m_showPreview); }
     bool showPreview() const { return m_showPreview && m_mode == Mode::Searching; }
     Forecast const& forecast() const { return m_forecast; }
     PlayLayer* layer() const { return m_layer; }
@@ -93,7 +104,11 @@ private:
     std::vector<Interaction> m_interactions;
     std::uint64_t m_inputEdges = 0;
     double m_robotTime = 0, m_observationTime = -1;
-    bool m_showPreview = true;
+    bool m_showPreview = true,m_smoothSearch=true,m_cachedDesired=false;
+    GuidanceClock m_guidanceClock;
+    std::vector<geode::Ref<GameObject>> m_obstacleObjects,m_interactionObjects;
+    unsigned m_sceneObjectCount=0;
+    void rebuildSceneCache();
     std::string m_guidanceNote, m_lastFailure;
     FormState readState(PlayerObject* player) const;
     void updateIntelligence(PlayerObject* player);

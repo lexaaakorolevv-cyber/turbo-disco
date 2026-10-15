@@ -42,7 +42,9 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
     auto targetAt = [&](double sampleX) {
         std::vector<std::pair<double, double>> blocked;
         for (auto const& o : obstacles) {
-            auto predicted = obstacleAt(o, std::abs(s.vx) > 1e-6 ? std::abs((sampleX - s.x) / s.vx) : 0);
+            double at=std::abs(s.vx)>1e-6?std::abs((sampleX-s.x)/s.vx):0;
+            if(!overlapsHorizontal(o,sampleX,sampleX,rx,at,at))continue;
+            auto predicted = obstacleAt(o,at);
             auto span = verticalSpan(predicted, sampleX, rx);
             if (span && span->second + ry > low && span->first - ry < high)
                 blocked.emplace_back(std::max(low, span->first - ry), std::min(high, span->second + ry));
@@ -80,6 +82,8 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
     struct TraceNode { Point point; int parent; };
     std::vector<TraceNode> tree;
     if (forecast) tree.push_back({{s.x,s.y},-1});
+    if(forecast)tree.reserve(1+Width*Depth*2);
+    std::vector<Obstacle> nearby;nearby.reserve(obstacles.size());
     int bestTrace = 0;
     std::vector<Node> beam{{s.y, s.vy, 0, s.pressRemaining, s.held, s.held}}, next;
     beam.reserve(Width); next.reserve(2 * Width);
@@ -94,6 +98,7 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
         next.clear();
         double x1 = s.x + s.vx * time;
         double x2 = x1 + s.vx * segment;
+        horizontalCandidates(obstacles,x1,x2,rx,time,time+segment,nearby);
         // Future wave states aim six units ahead of their own position, so a
         // climb starts before the wall without chasing an obsolete gap.
         double localTarget = wave ? targetAt(x2 + s.vx * 6) : target;
@@ -116,7 +121,7 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
             }
             if (child.y < low || child.y > high) continue;
             bool collision = false;
-            for (auto const& obstacle : obstacles)
+            for (auto const& obstacle : nearby)
                 if (forecastOverlap(x1, node.y, x2, child.y, rx, ry, obstacle, time, time + segment)) { collision = true; break; }
             if (collision) continue;
             // A small height error is preferable to continuous correction.

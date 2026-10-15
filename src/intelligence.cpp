@@ -72,11 +72,26 @@ void FailureMemory::record(FailureRecord const& f){
     if(!std::isfinite(f.x)||!std::isfinite(f.y)||!std::isfinite(f.vy))return;
     for(auto&r:m_records)if(r.form==f.form&&r.kind==f.kind&&r.held==f.held&&r.inverted==f.inverted&&r.mini==f.mini&&
         r.object==f.object&&std::abs(r.x-f.x)<20&&std::abs(r.y-f.y)<24){r.count=std::min(r.count+1,1000u);return;}
-    if(m_records.size()>=256)m_records.erase(m_records.begin());m_records.push_back(f);
+    if(m_records.size()>=256)m_records.erase(m_records.begin());m_records.push_back(f);m_indexDirty=true;
 }
-double FailureMemory::penalty(FormState const&s,bool down)const{double cost=0;for(auto const&r:m_records)
-    if(r.form==s.form&&r.inverted==s.inverted&&r.mini==(s.scale<.9)&&r.held==down&&std::abs(s.x-r.x)<28&&std::abs(s.y-r.y)<32&&std::abs(s.vy-r.vy)<5)
-        cost+=std::min(r.count,10u)*.6*(1-std::abs(s.x-r.x)/28);return std::min(cost,8.);}
+void FailureMemory::index() const {
+    if(!m_indexDirty)return;
+    m_byX.resize(m_records.size());for(std::size_t i=0;i<m_byX.size();i++)m_byX[i]=i;
+    std::stable_sort(m_byX.begin(),m_byX.end(),[&](auto a,auto b){return m_records[a].x<m_records[b].x;});
+    m_indexDirty=false;
+}
+double FailureMemory::penalty(FormState const&s,bool down)const{
+    if(m_records.empty())return 0;index();double cost=0;
+    auto first=std::lower_bound(m_byX.begin(),m_byX.end(),s.x-28,[&](auto i,double x){return m_records[i].x<x;});
+    // Preserve insertion order of additions for identical floating point costs.
+    std::array<std::size_t,256> hits;std::size_t count=0;
+    for(auto p=first;p!=m_byX.end()&&m_records[*p].x<s.x+28;++p)hits[count++]=*p;
+    std::sort(hits.begin(),hits.begin()+count);
+    for(std::size_t i=0;i<count;i++){auto const&r=m_records[hits[i]];
+        if(r.form==s.form&&r.inverted==s.inverted&&r.mini==(s.scale<.9)&&r.held==down&&std::abs(s.x-r.x)<28&&std::abs(s.y-r.y)<32&&std::abs(s.vy-r.vy)<5)
+            cost+=std::min(r.count,10u)*.6*(1-std::abs(s.x-r.x)/28);
+    }return std::min(cost,8.);
+}
 double FailureMemory::timingBias(FormState const&s)const{double b=0;for(auto const&r:m_records)if(r.form==s.form&&r.inverted==s.inverted&&std::abs(s.x-r.x)<120)
     b+=(r.kind==FailureKind::LatePress?.15:r.kind==FailureKind::EarlyPress?-.15:0)*std::min(r.count,8u);return std::clamp(b,-2.,2.);}
 double FailureMemory::heightBias(FormState const&s)const{double b=0;for(auto const&r:m_records)if(r.form==s.form&&r.inverted==s.inverted&&std::abs(s.x-r.x)<160)

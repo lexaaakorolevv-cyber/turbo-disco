@@ -1,5 +1,7 @@
 #pragma once
 #include <array>
+#include <algorithm>
+#include <span>
 #include <cstdint>
 #include <vector>
 #include <optional>
@@ -22,6 +24,18 @@ struct Forecast {
     bool down = false;
     double survival = 0;
 };
+// Conservative horizontal broad phase. Includes the whole moving rectangle
+// during this time slice, so no possible swept collision is discarded.
+inline bool overlapsHorizontal(Obstacle const& o,double x1,double x2,double rx,double start,double end) {
+    double a=o.vx*std::clamp(start,0.,o.motionHorizon),b=o.vx*std::clamp(end,0.,o.motionHorizon);
+    return std::max(x1,x2)+rx>=o.left+std::min(a,b) &&
+        std::min(x1,x2)-rx<=o.right+std::max(a,b);
+}
+inline void horizontalCandidates(std::span<Obstacle const> source,double x1,double x2,double rx,
+    double start,double end,std::vector<Obstacle>& result) {
+    result.clear();
+    for(auto const&o:source)if(overlapsHorizontal(o,x1,x2,rx,start,end))result.push_back(o);
+}
 Obstacle obstacleAt(Obstacle const& object, double time);
 bool forecastOverlap(double x1, double y1, double x2, double y2, double halfWidth,
     double halfHeight, Obstacle const& object, double start, double end);

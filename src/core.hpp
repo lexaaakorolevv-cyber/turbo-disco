@@ -12,7 +12,7 @@
 namespace rf {
 using Tick = std::uint64_t;
 inline constexpr Tick MaxTicks = 240 * 1800;
-inline constexpr char ModVersion[] = "1.6.0";
+inline constexpr char ModVersion[] = "1.7.0";
 
 struct Action {
     Tick tick = 0;

@@ -53,3 +53,7 @@ Geode UI и файловые API проверены по [исходникам S
 Для Windows используются реальные `GJBaseGameLayer::getBumpMod(PlayerObject*, int)` и `GameObject::isFacingDown()`. В ARM64-адаптере для этих двух функций применены локальные приближённые коэффициенты/направление по rotation, поскольку соответствующие определения отличаются по платформе. Положение, границы и обычный ввод по-прежнему получаются из настоящей игры. Предсказатель не вызывает `ringJump`, `spiderTestJump`, `flipGravity` и не присваивает состояние настоящего игрока.
 
 Траектория рисуется настоящим cocos `CCDrawNode::create/clear/drawSegment/drawDot`; координаты проходят `CCNode::convertToWorldSpace/convertToNodeSpace` через родителя игрока и HUD. Калибровка измеряет числа между штатными шагами, не патчит физику и не заменяет native update.
+
+## Дополнения 1.7.0
+
+Оформление использует уже проверенные `CCDrawNode::drawPolygon/drawSegment/drawDot`, `CCMenuItemSpriteExtra::create` и реальное поле `m_scaleMultiplier`, `CCLabelTTF::getString/setString`. Для линии используются настоящие `CCNode::nodeToWorldTransform/worldToNodeTransform` и `CCPointApplyAffineTransform`; матрицы берутся один раз на обновление линии. Списки объектов удерживаются через Geode `Ref<GameObject>`, очищаются при выходе и пересобираются после reset/изменения размера native `m_objects`. Значения геометрии между разными outer updates не кэшируются.

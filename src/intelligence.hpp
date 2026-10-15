@@ -56,6 +56,9 @@ struct FailureRecord {
 };
 class FailureMemory {
     std::vector<FailureRecord> m_records;
+    mutable std::vector<std::size_t> m_byX;
+    mutable bool m_indexDirty=true;
+    void index() const;
 public:
     void record(FailureRecord const& failure);
     double penalty(FormState const& state,bool down) const;

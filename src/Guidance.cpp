@@ -5,9 +5,34 @@
 
 using namespace geode::prelude;
 namespace rf {
+void Runtime::rebuildSceneCache(){
+    m_obstacleObjects.clear();m_interactionObjects.clear();
+    m_sceneObjectCount=m_layer->m_objects?m_layer->m_objects->count():0;
+    if(m_layer->m_objects)for(auto object:CCArrayExt<GameObject*>(m_layer->m_objects)){
+        switch(object->m_objectType){
+        case GameObjectType::Solid:case GameObjectType::Breakable:case GameObjectType::Hazard:
+        case GameObjectType::AnimatedHazard:case GameObjectType::Slope:m_obstacleObjects.emplace_back(object);break;
+        case GameObjectType::YellowJumpRing:case GameObjectType::PinkJumpRing:case GameObjectType::RedJumpRing:
+        case GameObjectType::GravityRing:case GameObjectType::GreenRing:case GameObjectType::DropRing:
+        case GameObjectType::YellowJumpPad:case GameObjectType::PinkJumpPad:case GameObjectType::RedJumpPad:
+        case GameObjectType::GravityPad:case GameObjectType::SpiderOrb:case GameObjectType::SpiderPad:
+        case GameObjectType::InverseGravityPortal:case GameObjectType::NormalGravityPortal:case GameObjectType::GravityTogglePortal:
+        case GameObjectType::CubePortal:case GameObjectType::ShipPortal:case GameObjectType::BallPortal:
+        case GameObjectType::UfoPortal:case GameObjectType::WavePortal:case GameObjectType::RobotPortal:
+        case GameObjectType::SpiderPortal:case GameObjectType::SwingPortal:case GameObjectType::RegularSizePortal:
+        case GameObjectType::MiniSizePortal:case GameObjectType::DashRing:case GameObjectType::GravityDashRing:
+        case GameObjectType::CustomRing:case GameObjectType::TeleportOrb:case GameObjectType::TeleportPortal:
+            m_interactionObjects.emplace_back(object);break;
+        case GameObjectType::Modifier:{auto id=object->m_objectID;if(id==200||id==201||id==202||id==203||id==1334)m_interactionObjects.emplace_back(object);break;}
+        default:break;
+        }
+    }
+    m_guidanceClock.reset();
+}
 void Runtime::collectObstacles(double minX, double maxX, double minY, double maxY) {
     m_flightObstacles.clear();
-    if (m_layer->m_objects) for (auto object : CCArrayExt<GameObject*>(m_layer->m_objects)) {
+    for (auto const& retained : m_obstacleObjects) {
+        auto object=retained.data();
         auto type = object->m_objectType;
         if (type != GameObjectType::Solid && type != GameObjectType::Breakable && type != GameObjectType::Hazard &&
             type != GameObjectType::AnimatedHazard && type != GameObjectType::Slope) continue;
@@ -108,7 +133,8 @@ void Runtime::updateIntelligence(PlayerObject* p){
 }
 void Runtime::collectInteractions(double minX,double maxX,double minY,double maxY){
     m_interactions.clear();bool complex=false;
-    if(m_layer->m_objects)for(auto object:CCArrayExt<GameObject*>(m_layer->m_objects)){
+    for(auto const& retained:m_interactionObjects){
+        auto object=retained.data();
         if(object->m_isDisabled||object->m_isGroupDisabled||object->m_isNoTouch||object->m_isActivated)continue;
         auto type=object->m_objectType;
         if(type==GameObjectType::Solid||type==GameObjectType::Hazard||type==GameObjectType::Decoration||type==GameObjectType::AnimatedHazard)continue;
@@ -178,8 +204,15 @@ void Runtime::collectInteractions(double minX,double maxX,double minY,double max
     m_guidanceNote=complex?"Dash/custom/телепорт: ограниченный прогноз":"Прогноз приближённый";
 }
 void Runtime::guideFlight(PlayerObject* player){
-    if(player->m_isDashing){m_guidanceNote="Native dash: сохраняю текущий ввод";m_forecast={};return;}
+    if(player->m_isDashing){m_guidanceClock.reset();m_guidanceNote="Native dash: сохраняю текущий ввод";m_forecast={};return;}
     if(m_tick<m_flightFrom){m_forecast={};return;}
+    auto count=m_layer->m_objects?m_layer->m_objects->count():0;
+    if(count!=m_sceneObjectCount)rebuildSceneCache();
+    std::uint64_t events=player->m_touchedRings.size()*16ULL+player->m_touchedPad*1ULL+
+        player->m_touchedRing*2ULL+player->m_touchedGravityPortal*4ULL+player->m_isOnSlope*8ULL;
+    if(m_smoothSearch&&!m_guidanceClock.needsPlan(m_outerUpdates,m_observation,events,m_inputEdges)){
+        m_searchDesired=m_cachedDesired;return;
+    }
     m_guidedFlight=true;
     auto s=m_calibration.adjusted(m_observation);
     double reach=std::abs(s.vx)*76+s.halfWidth;
@@ -189,7 +222,7 @@ void Runtime::guideFlight(PlayerObject* player){
     auto policy=m_search?m_search->policy():0;
     bool interactive=std::any_of(m_interactions.begin(),m_interactions.end(),[&](auto const&i){return std::abs((i.area.left+i.area.right)/2-s.x)<std::abs(s.vx)*42+s.halfWidth;});
     if(interactive||(s.form!=Form::Cube&&s.form!=Form::Ship&&s.form!=Form::Wave)){
-        auto decision=chooseFormInput(s,m_flightObstacles,m_interactions,&m_failures,(static_cast<int>(policy%7)-3)*.07);
+        auto decision=chooseFormInput(s,m_flightObstacles,m_interactions,&m_failures,(static_cast<int>(policy%7)-3)*.07,m_showPreview);
         m_searchDesired=decision.down;if(m_showPreview)m_forecast=std::move(decision.forecast);
     }else if(s.form==Form::Cube){
         GroundObservation g{s.x,s.y,s.vy,s.vx,s.halfWidth,s.halfHeight,player->m_isUpsideDown?1e6:m_spawnFloor,
@@ -212,6 +245,7 @@ void Runtime::guideFlight(PlayerObject* player){
             if(t==GameObjectType::DashRing||t==GameObjectType::GravityDashRing||t==GameObjectType::CustomRing||t==GameObjectType::TeleportOrb)m_searchDesired=true;
         }
     }
+    m_cachedDesired=m_searchDesired;
 }
 void Runtime::rememberFailure(GameObject* object){
     auto s=readState(m_layer->m_player1);m_observation=s;
@@ -231,6 +265,7 @@ void Runtime::takeControl(){
 void Runtime::returnToBot(){
     if(m_mode!=Mode::Assisting){m_status="Сейчас управление у бота";return;}
     m_plan=prefix(m_trial.actions,m_tick);m_cursor=m_plan.size();m_flightFrom=m_tick;
+    m_guidanceClock.reset();
     m_searchDesired=m_held;m_mode=Mode::Searching;m_pendingHuman=false;m_autosaveDirty=true;m_autosaveUrgent=true;
     m_status="Участок помощи записан. Бот продолжает";
 }

@@ -99,31 +99,36 @@ bool advanceForm(FormState&s,bool down,double dt,std::span<Obstacle const>object
     return std::isfinite(s.x)&&std::isfinite(s.y)&&std::isfinite(s.vy);
 }
 FormDecision chooseFormInput(FormState const&initial,std::span<Obstacle const>objects,
-    std::span<Interaction const>interactions,FailureMemory const*failures,double bias){
+    std::span<Interaction const>interactions,FailureMemory const*failures,double bias,bool includeForecast){
     if(!std::isfinite(initial.x)||!std::isfinite(initial.y)||!std::isfinite(initial.vy)||!std::isfinite(initial.vx)||
         !std::isfinite(initial.floor)||!std::isfinite(initial.ceiling)||!std::isfinite(initial.gravity)||!std::isfinite(initial.scale)||initial.gravity<=0||initial.scale<=0||static_cast<int>(initial.form)<0||static_cast<int>(initial.form)>7)return {};
     struct Node{FormState s;std::uint64_t used=0;double cost=0;bool first=false;int trace=0;};
     struct Trace{Point p;int parent;};
-    std::vector<Trace> tree{{{initial.x,initial.y},-1}};tree.reserve(6200);
+    std::vector<Trace> tree; if(includeForecast){tree.reserve(7169);tree.push_back({{initial.x,initial.y},-1});}
+    std::vector<Obstacle> nearby;nearby.reserve(objects.size());
     std::vector<Node> beam{{initial}},next;beam.reserve(64);next.reserve(128);
     FormDecision result;int bestTrace=0;double time=0;
     double centre=std::isfinite(initial.ceiling)&&initial.ceiling-initial.floor<1500?(initial.floor+initial.ceiling)/2:initial.y;
     for(int depth=0;depth<56;++depth){double dt=depth<8?.25:depth<24?.5:1.;next.clear();
+        double left=beam.front().s.x,right=left,radius=0;
+        for(auto const& n:beam){left=std::min(left,n.s.x-std::abs(n.s.vx)*dt);right=std::max(right,n.s.x+std::abs(n.s.vx)*dt);radius=std::max(radius,n.s.halfWidth*1.7);}
+        horizontalCandidates(objects,left,right,radius,time,time+dt,nearby);
         for(auto const&n:beam)for(bool down:{false,true}){
             auto child=n;if(depth==0)child.first=down;
-            if(!advanceForm(child.s,down,dt,objects,interactions,child.used,time))continue;
+            if(!advanceForm(child.s,down,dt,nearby,interactions,child.used,time))continue;
             double error=std::max(0.,std::abs(child.s.y-centre-bias*25)-8);
             child.cost+=error*error*.0005*dt+(child.s.held!=n.s.held?.35:0);
             if(failures)child.cost+=failures->penalty(child.s,down)*dt;
-            tree.push_back({{child.s.x,child.s.y},n.trace});child.trace=static_cast<int>(tree.size()-1);next.push_back(child);
+            if(includeForecast){tree.push_back({{child.s.x,child.s.y},n.trace});child.trace=static_cast<int>(tree.size()-1);}
+            next.push_back(child);
         }
-        if(next.empty()){result.forecast.collision=Point{beam.front().s.x+beam.front().s.vx*dt,beam.front().s.y+beam.front().s.vy*dt};break;}
+        if(next.empty()){if(includeForecast)result.forecast.collision=Point{beam.front().s.x+beam.front().s.vx*dt,beam.front().s.y+beam.front().s.vy*dt};break;}
         std::stable_sort(next.begin(),next.end(),[](auto const&a,auto const&b){return a.cost<b.cost;});beam.clear();
         for(auto const&n:next){bool duplicate=std::any_of(beam.begin(),beam.end(),[&](auto const&b){return n.first==b.first&&n.used==b.used&&n.s.form==b.s.form&&n.s.inverted==b.s.inverted&&n.s.held==b.s.held&&n.s.grounded==b.s.grounded&&std::abs(n.s.y-b.s.y)<2&&std::abs(n.s.vy-b.s.vy)<.5&&std::abs(n.s.pressRemaining-b.s.pressRemaining)<.5;});
             if(!duplicate)beam.push_back(n);if(beam.size()==64)break;}
         time+=dt;result.down=beam.front().first;result.survival=time;bestTrace=beam.front().trace;
     }
-    for(int i=bestTrace;i>=0;i=tree[i].parent)result.forecast.path.push_back(tree[i].p);
+    if(includeForecast)for(int i=bestTrace;i>=0;i=tree[i].parent)result.forecast.path.push_back(tree[i].p);
     std::reverse(result.forecast.path.begin(),result.forecast.path.end());result.forecast.down=result.down;result.forecast.survival=result.survival;return result;
 }
 }

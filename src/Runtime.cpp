@@ -28,6 +28,8 @@ void Runtime::bind(PlayLayer* layer) {
     m_trial = {};
     m_calibration = {}; m_failures = {}; m_motion.reset(); m_forecast = {};
     m_guidanceNote.clear(); m_lastFailure.clear();
+    m_showPreview=Mod::get()->getSettingValue<bool>("show-preview");
+    m_smoothSearch=Mod::get()->getSettingValue<bool>("smooth-search");
     m_status = "Готов. Только обычный режим, один игрок.";
     log::info("Route Finder {} attached to active level", ModVersion);
 }
@@ -64,6 +66,7 @@ void Runtime::unbind(PlayLayer* layer) {
     if (active()) stop("Выход из уровня");
     autosaveSearch(true);
     releaseInput();
+    m_obstacleObjects.clear();m_interactionObjects.clear();m_guidanceClock.reset();
     m_layer = nullptr;
     m_menuOpen = false;
     m_releasePending = false;
@@ -154,6 +157,7 @@ bool Runtime::prepare() {
     m_inputPacer.reset(SearchCps);
     m_calibration = {}; m_failures = {}; m_motion.reset(); m_forecast = {};
     m_showPreview = mod->getSettingValue<bool>("show-preview");
+    m_smoothSearch = mod->getSettingValue<bool>("smooth-search");
     m_guidanceNote.clear(); m_lastFailure.clear();
     m_started = std::chrono::steady_clock::now();
     m_attempts = 0;
@@ -289,6 +293,7 @@ void Runtime::beginAttempt() {
     m_flightObstacles.clear();
     m_motion.reset(); m_calibration.resetSampling(); m_forecast = {};
     m_observationTime = -1; m_robotTime = 0; m_inputEdges = 0;
+    m_guidanceClock.reset();m_cachedDesired=false;rebuildSceneCache();
     m_trialPercent = 0;
     m_accumulator = 0;
     ++m_attempts;
@@ -575,6 +580,11 @@ std::string Runtime::summary() const {
         m_attempts, m_budget.maxAttempts, best, remaining / 60, remaining % 60, phase, m_status,
         m_autosaveStatus.empty() ? "" : "\n", m_autosaveStatus) +
         fmt::format("\n{} | Калибровка: {} | Память ошибок: {}", m_guidanceNote, m_calibration.samples(), m_failures.size());
+}
+char const* Runtime::modeName() const {
+    switch(m_mode){case Mode::Recording:return "ЗАПИСЬ";case Mode::Searching:return "ПОИСК";
+    case Mode::Assisting:return "РУЧНАЯ ПОМОЩЬ";case Mode::Verifying:return "ПРОВЕРКА";
+    case Mode::Playing:return "ВОСПРОИЗВЕДЕНИЕ";case Mode::Idle:return "ГОТОВ";}return "ГОТОВ";
 }
 std::string Runtime::hudSummary() const {
     char const* state = "Готов";
