@@ -126,7 +126,11 @@ Macro fromJson(json const& j) {
 }
 
 void saveMacro(std::filesystem::path const& path, Macro const& m) {
-    auto contents = toJson(m).dump(2);
+    saveJsonFile(path, toJson(m));
+}
+void saveJsonFile(std::filesystem::path const& path, json const& value, int indent) {
+    auto contents = value.dump(indent);
+    require(contents.size() <= 128 * 1024 * 1024, "JSON exceeds 128 MiB");
     std::filesystem::create_directories(path.parent_path());
     auto temp = path;
     temp += ".tmp";
@@ -156,12 +160,15 @@ void saveMacro(std::filesystem::path const& path, Macro const& m) {
 }
 
 Macro loadMacro(std::filesystem::path const& path) {
+    return fromJson(loadJsonFile(path));
+}
+json loadJsonFile(std::filesystem::path const& path) {
     auto source = path;
     if (!std::filesystem::exists(source)) source += ".bak";
     require(std::filesystem::file_size(source) <= 128 * 1024 * 1024, "Macro exceeds 128 MiB");
     std::ifstream in(source, std::ios::binary);
     if (!in) throw std::runtime_error("Cannot open macro");
-    return fromJson(json::parse(in));
+    return json::parse(in);
 }
 
 bool sameSample(Sample const& a, Sample const& b) {
@@ -217,6 +224,9 @@ void Search::observe(std::vector<Action> const& actions, Tick death, double perc
             for (int shift : {-1, 1, -2, 2, -4, 4, -8, 8, -16, 16, -32, 32}) {
                 m_focusEdits.push_back({i, release, shift}); // Move the whole hold.
                 if (release != i) m_focusEdits.push_back({release, release, shift}); // Adjust duration.
+                // Coordinate later pulses as well; single-edge edits cannot
+                // repair a whole section that started several ticks too late.
+                if (pulses > 1) m_focusEdits.push_back({i, m_focusBase.size() - 1, shift});
             }
         }
     }
@@ -253,8 +263,16 @@ bool Search::issue(std::vector<Action> const& actions) {
 }
 std::vector<Action> Search::next(Tick limit) {
     m_guidanceFrom = 0;
+    m_phase = SearchPhase::Guided;
     if (!limit) return {};
     if (m_elites.empty()) { m_policy = 0; m_generation = 1; return {}; }
+    if (m_stale >= 128 && (m_choices + 1) % 32 == 0) {
+        ++m_choices; ++m_escapeCount;
+        m_policy = (m_rng() + m_escapeCount * 29) % 99;
+        m_phase = SearchPhase::Restart;
+        if (issue({})) return {};
+        m_phase = SearchPhase::Guided;
+    }
     // Reserve one in four attempts for alternate policies / broader rollback.
     // The other attempts optimize the current frontier before abandoning it.
     if (m_choices++ % 4 != 0) while (!m_focusEdits.empty()) {
@@ -267,7 +285,7 @@ std::vector<Action> Search::next(Tick limit) {
             appendAction(result, static_cast<Tick>(tick), false);
             m_policy = m_focusPolicy;
             m_guidanceFrom = std::min(limit, m_focusDeath + 1);
-            if (issue(result)) return result;
+            if (issue(result)) { m_phase = SearchPhase::Timing; return result; }
             continue;
         }
         auto first = static_cast<std::int64_t>(m_focusBase[edit.first].tick) + edit.delta;
@@ -280,7 +298,7 @@ std::vector<Action> Search::next(Tick limit) {
             result[i].tick = static_cast<Tick>(static_cast<std::int64_t>(result[i].tick) + edit.delta);
         m_policy = m_focusPolicy;
         m_guidanceFrom = std::min(limit, std::max(m_focusDeath + 1, result.back().tick + 1));
-        if (issue(result)) return result;
+        if (issue(result)) { m_phase = SearchPhase::Timing; return result; }
     }
     std::vector<Action> result;
     for (int retry = 0; retry < 64; ++retry) {
@@ -294,7 +312,18 @@ std::vector<Action> Search::next(Tick limit) {
         Tick start = death > back ? death - back : 0;
         auto kind = generation % 6;
         m_policy = (generation * 17 + generation / 6) % 99;
-        if (kind == 0 || kind == 1 || kind == 4) {
+        if (m_stale >= 32 && m_choices % 8 == 0) {
+            // Sample a complete tail from a wider rollback, rather than
+            // repeatedly changing one ineffective input at the same frontier.
+            start = death > window ? death - window : 0;
+            result = prefix(parent.actions, start);
+            bool held = heldBefore(result, start);
+            static constexpr Tick intervals[]{1, 4, 8, 15, 24, 32, 64, 120, 240};
+            for (Tick t = start; t < std::min(limit, death + 120); t += intervals[m_rng() % 9])
+                appendAction(result, t, held = !held);
+            m_guidanceFrom = result.empty() ? start : result.back().tick + 1;
+            m_phase = SearchPhase::Explore;
+        } else if (kind == 0 || kind == 1 || kind == 4) {
             // A cube cannot correct an already committed jump while airborne.
             // Start before the takeoff that led to the failure.
             if (!parent.flight) for (auto i = parent.actions.rbegin(); i != parent.actions.rend(); ++i)

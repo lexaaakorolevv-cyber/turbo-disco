@@ -60,6 +60,12 @@ private:
     static constexpr std::uint64_t GameSeed = 0x526f75746546696eULL;
     Budget m_budget;
     std::chrono::steady_clock::time_point m_started;
+    std::chrono::steady_clock::time_point m_lastAutosave;
+    bool m_autosaveDirty = false, m_autosaveUrgent = false;
+    bool m_selectedForSearch = false;
+    std::uint64_t m_previousAttempts = 0;
+    double m_previousSeconds = 0, m_runElapsed = 0;
+    std::string m_autosaveStatus;
     nlohmann::json m_environment;
     Macro m_trial;
     std::optional<Macro> m_best, m_selected, m_target;
@@ -83,6 +89,10 @@ private:
     Macro snapshot(bool complete = false) const;
     void remember(Macro const& macro);
     void writeBest();
+    void autosaveSearch(bool force = false);
+    bool restoreSearch();
+    double elapsedSeconds() const;
+    std::filesystem::path sessionPath() const;
     void failReplay(std::string const& why);
     std::filesystem::path macroPath(bool best) const;
 };

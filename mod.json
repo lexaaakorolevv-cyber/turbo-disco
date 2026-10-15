@@ -6,21 +6,21 @@
     },
     "id": "local.routefinder",
     "name": "Route Finder",
-    "version": "v1.4.0",
+    "version": "v1.5.0",
     "developer": "Route Finder contributors",
     "description": "Physics-tick recorder, replay verifier and bounded single-player route search.",
     "settings": {
         "max-attempts": {
             "type": "int",
             "name": "Attempt limit (includes verification)",
-            "default": 2000,
+            "default": 10000,
             "min": 2,
             "max": 100000
         },
         "max-seconds": {
             "type": "int",
             "name": "Wall time limit (seconds)",
-            "default": 600,
+            "default": 3600,
             "min": 10,
             "max": 86400
         },
@@ -44,6 +44,12 @@
             "default": 1337,
             "min": 1,
             "max": 2147483647
+        },
+        "auto-resume": {
+            "type": "bool",
+            "name": "Resume saved search",
+            "description": "Find route restores this level search session when compatible. Disable to start a fresh search. Every attempt still starts from the beginning.",
+            "default": true
         }
     }
 }

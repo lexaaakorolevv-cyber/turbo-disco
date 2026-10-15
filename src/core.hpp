@@ -12,7 +12,7 @@
 namespace rf {
 using Tick = std::uint64_t;
 inline constexpr Tick MaxTicks = 240 * 1800;
-inline constexpr char ModVersion[] = "1.4.0";
+inline constexpr char ModVersion[] = "1.5.0";
 
 struct Action {
     Tick tick = 0;
@@ -59,6 +59,10 @@ nlohmann::json toJson(Macro const& macro);
 Macro fromJson(nlohmann::json const& json);
 void saveMacro(std::filesystem::path const& path, Macro const& macro);
 Macro loadMacro(std::filesystem::path const& path);
+void saveJsonFile(std::filesystem::path const& path, nlohmann::json const& value, int indent = 2);
+nlohmann::json loadJsonFile(std::filesystem::path const& path);
+nlohmann::json compactPlan(std::vector<Action> const& actions);
+std::vector<Action> expandPlan(nlohmann::json const& value, Tick end = MaxTicks);
 bool sameSample(Sample const& expected, Sample const& actual);
 bool heldBefore(std::vector<Action> const& actions, Tick tick);
 void appendAction(std::vector<Action>& actions, Tick tick, bool down);
@@ -66,6 +70,7 @@ std::vector<Action> prefix(std::vector<Action> const& actions, Tick endExclusive
 
 // Bounded elitist search scored only by actual game attempts. Each genome is
 // replayed from a native reset; forecasts never certify an elite or a success.
+enum class SearchPhase { Guided, Timing, Explore, Restart };
 class Search {
 public:
     static constexpr std::size_t ArchiveLimit = 24;
@@ -82,6 +87,11 @@ public:
     std::size_t size() const { return m_elites.size(); }
     Tick guidanceFrom() const { return m_guidanceFrom; }
     std::uint64_t policy() const { return m_policy; }
+    SearchPhase phase() const { return m_phase; }
+    std::uint64_t staleAttempts() const { return m_stale; }
+    Tick window() const { return m_window; }
+    nlohmann::json snapshot() const;
+    static Search restore(nlohmann::json const& value);
 private:
     std::mt19937_64 m_rng;
     Tick m_window;
@@ -93,10 +103,23 @@ private:
     std::vector<Action> m_focusBase;
     Tick m_focusDeath = 0;
     std::uint64_t m_focusPolicy = 0, m_choices = 0;
+    std::uint64_t m_escapeCount = 0;
+    SearchPhase m_phase = SearchPhase::Guided;
     bool issue(std::vector<Action> const& actions);
     std::unordered_set<std::uint64_t> m_issued;
     std::vector<Elite> m_elites;
 };
+
+struct SearchSessionState {
+    Macro best;
+    Search search;
+    std::vector<Action> plan;
+    std::uint64_t seed, attempts;
+    double seconds;
+};
+nlohmann::json searchSessionJson(Macro const& best, Search const& search,
+    std::vector<Action> const& plan, std::uint64_t seed, std::uint64_t attempts, double seconds);
+SearchSessionState parseSearchSession(nlohmann::json const& value);
 
 struct Budget {
     std::uint64_t maxAttempts = 2000;

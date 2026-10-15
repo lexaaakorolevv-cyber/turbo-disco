@@ -16,9 +16,15 @@ void Runtime::bind(PlayLayer* layer) {
     m_layer = layer;
     m_best.reset();
     m_selected.reset();
+    m_selectedForSearch = false;
     m_target.reset();
     m_attempts = 0;
     m_trialPercent = 0;
+    m_search.reset();
+    m_previousAttempts = 0;
+    m_previousSeconds = m_runElapsed = 0;
+    m_autosaveStatus.clear();
+    m_autosaveDirty = m_autosaveUrgent = false;
     m_trial = {};
     m_status = "Готов. Только обычный режим, один игрок.";
     log::info("Route Finder {} attached to active level", ModVersion);
@@ -54,6 +60,7 @@ bool Runtime::syncActiveLayer() {
 void Runtime::unbind(PlayLayer* layer) {
     if (m_layer != layer) return;
     if (active()) stop("Выход из уровня");
+    autosaveSearch(true);
     releaseInput();
     m_layer = nullptr;
     m_menuOpen = false;
@@ -131,6 +138,7 @@ nlohmann::json Runtime::environment() const {
 
 bool Runtime::prepare() {
     if (active()) { m_status = "Сначала остановите текущую операцию"; return false; }
+    if (m_layer && m_search && (m_autosaveDirty || m_autosaveUrgent)) autosaveSearch(true);
     if (!syncActiveLayer()) return false;
     auto error = unsupported();
     if (!error.empty()) { m_status = error; return false; }
@@ -144,6 +152,13 @@ bool Runtime::prepare() {
     m_inputPacer.reset(SearchCps);
     m_started = std::chrono::steady_clock::now();
     m_attempts = 0;
+    m_previousAttempts = 0;
+    m_previousSeconds = 0;
+    m_runElapsed = 0;
+    m_autosaveDirty = false;
+    m_autosaveUrgent = false;
+    m_autosaveStatus.clear();
+    m_lastAutosave = m_started;
     m_oldCBS = m_layer->m_clickBetweenSteps;
     m_oldCOS = m_layer->m_clickOnSteps;
     m_haveOptions = true;
@@ -163,17 +178,29 @@ void Runtime::startRecording() {
 }
 void Runtime::startSearch() {
     if (!prepare()) return;
+    bool resume = Mod::get()->getSettingValue<bool>("auto-resume");
+    bool selected = m_selectedForSearch && m_selected && m_selected->environment == m_environment;
+    if (!selected && resume && restoreSearch()) return;
     m_search = std::make_unique<Search>(m_seed, Mod::get()->getSettingValue<int64_t>("mutation-window"));
-    if (m_selected && m_selected->environment == m_environment) {
+    if ((selected || resume) && m_selected && m_selected->environment == m_environment) {
         bool flight = !m_selected->trace.empty() && (m_selected->trace.back().flags & ((1u << 2) | (1u << 5)));
         m_search->observe(m_selected->actions, m_selected->ticks, m_selected->bestPercent, flight);
         m_best = m_selected;
     }
+    m_selectedForSearch = false;
     m_mode = Mode::Searching;
     m_plan = m_search->next(m_tickLimit);
     m_flightFrom = m_search->guidanceFrom();
     m_restart = true;
     m_status = "Поиск: куб + корабль + волна; лимит 16 CPS";
+    if (m_best && m_best->completed) {
+        m_target = m_best;
+        m_plan = m_best->actions;
+        m_verifyingSearch = true;
+        m_mode = Mode::Verifying;
+        m_status = "Восстановлен полный кандидат. Проверка с начала";
+    }
+    m_autosaveUrgent = true;
 }
 void Runtime::play() {
     if (!m_selected) { m_status = "Сначала загрузите или найдите макрос"; return; }
@@ -410,9 +437,13 @@ Macro Runtime::snapshot(bool complete) const {
 }
 void Runtime::remember(Macro const& macro) {
     if (!macro.ticks) return;
-    if (!m_best || macro.bestPercent > m_best->bestPercent + 1e-6 ||
+    if (!m_best || (macro.completed && !m_best->completed) || macro.bestPercent > m_best->bestPercent + 1e-6 ||
         (std::abs(macro.bestPercent - m_best->bestPercent) <= 1e-6 && macro.ticks > m_best->ticks))
+    {
         m_best = macro;
+        m_autosaveDirty = true;
+        if (macro.completed) m_autosaveUrgent = true;
+    }
 }
 
 std::filesystem::path Runtime::macroPath(bool best) const {
@@ -440,12 +471,14 @@ void Runtime::stop(std::string reason) {
     if (!active()) { m_status = std::move(reason); return; }
     if (!m_restart && m_tick) remember(snapshot());
     m_status = std::move(reason);
+    m_runElapsed = elapsedSeconds();
     m_mode = Mode::Idle;
     m_restart = false;
     m_accumulator = 0;
     m_releasePending = true;
     if (m_best && (!m_selected || !m_selected->verified)) m_selected = m_best;
     writeBest();
+    m_autosaveUrgent = true;
 }
 void Runtime::poll() {
     if (!active()) return;
@@ -464,6 +497,7 @@ void Runtime::service() {
         m_haveOptions = false;
         m_releasePending = false;
     }
+    autosaveSearch();
     if (!active() || !m_restart || m_menuOpen || !m_layer || m_layer->m_isPaused) return;
     auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - m_started).count();
     auto exhausted = m_budget.exhausted(m_attempts, elapsed);
@@ -597,11 +631,16 @@ bool Runtime::completed() {
     verified.stopReason = "Полная проверка с начала пройдена";
     m_selected = verified;
     m_best = verified;
+    m_runElapsed = elapsedSeconds();
     m_mode = Mode::Idle;
     m_restart = false;
     m_releasePending = true;
     try {
         saveMacro(macroPath(false), verified);
+        std::error_code ec;
+        std::filesystem::remove(sessionPath(), ec);
+        std::filesystem::remove(sessionPath().string() + ".bak", ec);
+        m_autosaveDirty = m_autosaveUrgent = false;
         m_status = "100%: проверка с начала пройдена, макрос сохранён";
     } catch (std::exception const& e) {
         m_status = fmt::format("Проверка пройдена; ошибка записи: {}. Нажмите «Сохранить макрос»", e.what());
@@ -636,6 +675,7 @@ void Runtime::load() {
         // A JSON flag is not proof of successful replay in this process.
         loaded.verified = false;
         m_selected = loaded;
+        m_selectedForSearch = true;
         m_best = loaded;
         m_status = loaded.completed ? "Макрос загружен. «Воспроизвести» повторно проверит его" :
             "Загружен неполный лучший участок; можно продолжить поиск";
@@ -644,7 +684,17 @@ void Runtime::load() {
 std::string Runtime::summary() const {
     double best = m_best ? m_best->bestPercent : 0;
     best = std::max(best, m_trialPercent);
-    return fmt::format("Попыток: {} / {}   Лучший: {:.2f}%\n{}", m_attempts, m_budget.maxAttempts, best, m_status);
+    auto remaining = static_cast<int>(std::max(0., m_budget.maxSeconds - elapsedSeconds()));
+    char const* phase = "Прогноз";
+    if (m_search) switch (m_search->phase()) {
+        case SearchPhase::Timing: phase = "Правка таймингов"; break;
+        case SearchPhase::Explore: phase = "Перебор участка"; break;
+        case SearchPhase::Restart: phase = "Новый маршрут"; break;
+        case SearchPhase::Guided: break;
+    }
+    return fmt::format("Попыток: {} / {}   Лучший: {:.2f}%\nОсталось: {}м {}с | {}\n{}{}{}",
+        m_attempts, m_budget.maxAttempts, best, remaining / 60, remaining % 60, phase, m_status,
+        m_autosaveStatus.empty() ? "" : "\n", m_autosaveStatus);
 }
 std::string Runtime::hudSummary() const {
     char const* state = "Готов";
