@@ -141,6 +141,7 @@ bool Runtime::prepare() {
     m_outerLimit = 240 * mod->getSettingValue<int64_t>("max-attempt-seconds");
     m_tickLimit = MaxTicks;
     m_seed = mod->getSettingValue<int64_t>("search-seed");
+    m_inputPacer.reset(static_cast<int>(mod->getSettingValue<int64_t>("max-cps")));
     m_started = std::chrono::steady_clock::now();
     m_attempts = 0;
     m_oldCBS = m_layer->m_clickBetweenSteps;
@@ -172,7 +173,7 @@ void Runtime::startSearch() {
     m_plan = m_search->next(m_tickLimit);
     m_flightFrom = m_search->guidanceFrom();
     m_restart = true;
-    m_status = "Поиск: куб + корабль + волна; удержания без ограничения импульсом";
+    m_status = fmt::format("Поиск: куб + корабль + волна; лимит {} CPS", m_inputPacer.limit());
 }
 void Runtime::play() {
     if (!m_selected) { m_status = "Сначала загрузите или найдите макрос"; return; }
@@ -223,7 +224,7 @@ void Runtime::guideFlight(PlayerObject* player) {
     if (!kind) {
         // Release a controller-generated hold at a mode exit. Replayed prefix
         // actions remain untouched because m_guidedFlight is false there.
-        if (m_guidedFlight && m_held) inject(false);
+        if (m_guidedFlight) m_searchDesired = false;
         m_guidedFlight = false;
         return;
     }
@@ -242,6 +243,8 @@ void Runtime::guideFlight(PlayerObject* player) {
     state.gravity = std::clamp(static_cast<double>(std::abs(player->m_gravityMod)), .05, 10.);
     state.inverted = player->m_isUpsideDown;
     state.held = m_held;
+    state.holdRemaining = m_inputPacer.remainingFrames(m_outerUpdates) / 4.;
+    state.minHold = m_inputPacer.dwellFrames() / 4.;
     auto playerRect = player->getObjectRect();
     state.halfWidth = std::clamp(static_cast<double>(playerRect.size.width) / 2, 2., 50.);
     state.halfHeight = std::clamp(static_cast<double>(playerRect.size.height) / 2, 2., 50.);
@@ -289,7 +292,7 @@ void Runtime::guideFlight(PlayerObject* player) {
     }
     auto down = chooseFlightInput(state, m_flightObstacles, flightTuning(m_attempts, m_seed));
     // No pulse timeout: holding can continue for seconds or a whole section.
-    if (down != m_held) inject(down);
+    m_searchDesired = down;
 }
 
 void Runtime::beginAttempt() {
@@ -319,6 +322,8 @@ void Runtime::beginAttempt() {
     m_cursor = 0;
     m_traceCursor = 0;
     m_guidedFlight = false;
+    m_searchDesired = false;
+    m_inputPacer.reset(m_inputPacer.limit());
     m_flightObstacles.clear();
     m_trialPercent = 0;
     m_accumulator = 0;
@@ -335,6 +340,7 @@ Macro Runtime::snapshot(bool complete) const {
     result.verified = false;
     result.attempts = m_attempts;
     result.searchSeed = m_seed;
+    result.searchMaxCps = m_target ? m_target->searchMaxCps : m_mode == Mode::Searching ? m_inputPacer.limit() : 0;
     return result;
 }
 void Runtime::remember(Macro const& macro) {
@@ -448,11 +454,17 @@ bool Runtime::beforeTick(float dt, bool halfTick, bool lastTick) {
     if (m_mode == Mode::Recording) {
         if (m_pendingHuman != m_held) inject(m_pendingHuman);
     } else if (m_cursor < m_plan.size() && m_plan[m_cursor].tick == m_tick) {
-        inject(m_plan[m_cursor++].down);
+        auto down = m_plan[m_cursor++].down;
+        if (m_mode == Mode::Searching) m_searchDesired = down;
+        else inject(down);
     }
     // Verification and replay consume only saved actions; they must never
     // make a fresh decision from the obstacle forecast.
-    if (m_mode == Mode::Searching) guideFlight(p);
+    if (m_mode == Mode::Searching) {
+        guideFlight(p);
+        auto down = m_inputPacer.apply(m_searchDesired, m_outerUpdates);
+        if (down != m_held) inject(down);
+    }
     ++m_tick; // Count consumed input boundaries, including the eventual death tick.
     m_trialPercent = std::max(m_trialPercent, static_cast<double>(std::clamp(m_layer->getCurrentPercent(), 0.f, 100.f)));
     return true;
@@ -584,6 +596,7 @@ std::string Runtime::hudSummary() const {
         auto p = m_layer->m_player1;
         if (p->m_isShip || p->m_isDart)
             flight = fmt::format(" | {}: {}", p->m_isDart ? "Волна" : "Корабль", m_held ? "ЗАЖИМ" : "отпущено");
+        flight += fmt::format(" | {}/{} CPS", m_inputPacer.currentCps(), m_inputPacer.limit());
     }
     return fmt::format("RF {} | {}{}\nПопыток: {} | Лучший: {:.1f}%", ModVersion, state, flight, m_attempts, best);
 }

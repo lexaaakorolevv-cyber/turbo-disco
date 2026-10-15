@@ -1,5 +1,6 @@
 #include "core.hpp"
 #include "ui_geometry.hpp"
+#include "input.hpp"
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -41,8 +42,47 @@ int main() {
             check(g.firstRowY + g.buttonHeight / 2 < g.titleY - 10, "Buttons overlap title");
         }
         auto m = fixture();
+        m.searchMaxCps = 8;
         auto j = toJson(m);
         check(toJson(fromJson(j)) == j, "JSON roundtrip changed macro");
+        for (auto cps : {-1, 21}) {
+            auto bad = j;
+            bad["search_max_cps"] = cps;
+            rejects([&] { fromJson(bad); });
+        }
+        auto legacy = j;
+        legacy.erase("search_max_cps");
+        check(fromJson(legacy).searchMaxCps == 0, "Optional CPS provenance broke old schema");
+
+        for (int cps : {1, 3, 6, 8, 12, 20}) {
+            InputPacer pacer;
+            pacer.reset(cps);
+            bool held = false;
+            Tick lastEdge = 0, lastPress = 0;
+            bool haveEdge = false, havePress = false;
+            for (Tick frame = 0; frame < 2400; ++frame) {
+                // Several input boundaries inside one outer update must not
+                // turn the native half ticks into extra click opportunities.
+                for (int half = 0; half < 4; ++half) {
+                    bool actual = pacer.apply(!held, frame);
+                    check(pacer.currentCps() <= cps, "More than max CPS in a rolling game second");
+                    if (actual != held) {
+                        check(!haveEdge || frame - lastEdge >= pacer.dwellFrames(), "Press/release dwell ignored");
+                        if (actual) {
+                            check(!havePress || (frame - lastPress) * cps >= 240, "Press spacing exceeds CPS limit");
+                            lastPress = frame; havePress = true;
+                        }
+                        lastEdge = frame; haveEdge = true;
+                        held = actual;
+                    }
+                }
+            }
+            pacer.reset(cps);
+            check(!pacer.apply(false, 0), "Restart left a stuck input");
+            for (Tick frame = 0; frame < 1200; ++frame)
+                check(pacer.apply(true, frame), "Limiter cut a sustained hold");
+            check(!pacer.apply(false, 1200), "Release after a long hold was lost");
+        }
         auto temp = std::filesystem::temp_directory_path() / "routefinder-core-tests" / "macro.json";
         saveMacro(temp, m);
         m.bestPercent = 52;

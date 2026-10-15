@@ -31,6 +31,7 @@ void validate(Macro const& m) {
     require(std::isfinite(m.bestPercent) && m.bestPercent >= 0 && m.bestPercent <= 100,
         "Invalid percentage");
     require(!m.verified || m.completed, "A partial macro cannot be verified");
+    require(m.searchMaxCps >= 0 && m.searchMaxCps <= 20, "Invalid search CPS limit");
     require(m.timings.size() == m.ticks, "Missing per-tick physics timing");
     for (auto const& t : m.timings)
         require(std::isfinite(t.dt) && t.dt > 0 && t.dt <= 100, "Invalid physics timing");
@@ -69,7 +70,7 @@ json toJson(Macro const& m) {
     json j = {{"format", "routefinder"}, {"schema", 1}, {"environment", m.environment},
         {"ticks", m.ticks}, {"outer_updates", m.outerUpdates}, {"best_percent", m.bestPercent}, {"completed", m.completed},
         {"verified_from_start", m.verified}, {"attempts", m.attempts},
-        {"search_seed", m.searchSeed}, {"stop_reason", m.stopReason},
+        {"search_seed", m.searchSeed}, {"search_max_cps", m.searchMaxCps}, {"stop_reason", m.stopReason},
         {"actions", json::array()}, {"trace", json::array()}, {"timings", json::array()}};
     for (auto const& t : m.timings) j["timings"].push_back({t.dt, t.half, t.last});
     for (auto const& a : m.actions)
@@ -92,6 +93,11 @@ Macro fromJson(json const& j) {
     m.verified = j.at("verified_from_start").get<bool>();
     m.attempts = uintField(j.at("attempts"));
     m.searchSeed = uintField(j.at("search_seed"));
+    if (j.contains("search_max_cps")) {
+        auto cps = uintField(j.at("search_max_cps"));
+        require(cps <= 20, "Invalid search CPS limit");
+        m.searchMaxCps = static_cast<int>(cps);
+    }
     m.stopReason = j.at("stop_reason").get<std::string>();
     auto const& actions = j.at("actions");
     auto const& trace = j.at("trace");

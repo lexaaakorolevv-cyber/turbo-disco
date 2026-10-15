@@ -17,7 +17,7 @@ FlightTuning flightTuning(unsigned long long attempt, unsigned long long seed) {
 }
 namespace {
 struct Node {
-    double y, vy, cost;
+    double y, vy, cost, wait;
     bool held, first;
 };
 bool overlaps(double x1, double y1, double x2, double y2,
@@ -68,15 +68,18 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
     double sign = s.inverted ? -1. : 1.;
     double minVelocity = (s.inverted ? -8. : -6.4) / mini;
     double maxVelocity = (s.inverted ? 6.4 : 8.) / mini;
-    std::vector<Node> beam{{s.y, s.vy, 0, s.held, s.held}}, next;
+    std::vector<Node> beam{{s.y, s.vy, 0, s.holdRemaining, s.held, s.held}}, next;
     beam.reserve(Width); next.reserve(2 * Width);
-    bool answer = ((target - s.y) - (s.mode == FlightMode::Ship ? s.vy * 8 : 0)) * sign > 0;
+    bool answer = s.holdRemaining > 0 ? s.held :
+        ((target - s.y) - (s.mode == FlightMode::Ship ? s.vy * 8 : 0)) * sign > 0;
     for (int depth = 0; depth < Depth; ++depth) {
         next.clear();
         double x1 = s.x + s.vx * segment * depth;
         double x2 = x1 + s.vx * segment;
         for (auto const& node : beam) for (bool down : {false, true}) {
+            if (down != node.held && node.wait > 1e-9) continue;
             auto child = node;
+            child.wait = std::max(0., (down != node.held ? s.minHold : node.wait) - segment);
             child.first = depth == 0 ? down : node.first;
             child.held = down;
             if (s.mode == FlightMode::Wave) {
@@ -94,8 +97,9 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
             for (auto const& obstacle : obstacles)
                 if (overlaps(x1, node.y, x2, child.y, rx, ry, obstacle)) { collision = true; break; }
             if (collision) continue;
-            double error = child.y - target;
-            child.cost += error * error * .001 + child.vy * child.vy * .06 + (down != node.held ? .12 : 0);
+            // A small height error is preferable to continuous correction.
+            double error = std::max(0., std::abs(child.y - target) - 6.);
+            child.cost += error * error * .001 + child.vy * child.vy * .06 + (down != node.held ? 3. : 0);
             next.push_back(child);
         }
         if (next.empty()) break; // Keep the input with the longest safe forecast.
@@ -106,7 +110,7 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
         for (auto const& candidate : next) {
             bool duplicate = std::any_of(beam.begin(), beam.end(), [&](Node const& n) {
                 return n.first == candidate.first && std::abs(n.y - candidate.y) < 2 &&
-                    std::abs(n.vy - candidate.vy) < .4;
+                    std::abs(n.vy - candidate.vy) < .4 && std::abs(n.wait - candidate.wait) < .25;
             });
             if (!duplicate) beam.push_back(candidate);
             if (beam.size() == Width) break;

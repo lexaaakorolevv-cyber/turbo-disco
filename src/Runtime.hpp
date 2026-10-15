@@ -1,6 +1,7 @@
 #pragma once
 #include "core.hpp"
 #include "flight.hpp"
+#include "input.hpp"
 #include <Geode/Geode.hpp>
 #include <chrono>
 #include <memory>
@@ -65,6 +66,8 @@ private:
     std::unique_ptr<Search> m_search;
     Tick m_flightFrom = 0;
     bool m_guidedFlight = false;
+    bool m_searchDesired = false;
+    InputPacer m_inputPacer;
     std::vector<FlightObstacle> m_flightObstacles;
     std::string unsupported() const;
     std::string readinessError() const;

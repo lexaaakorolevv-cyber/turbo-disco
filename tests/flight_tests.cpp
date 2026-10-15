@@ -1,5 +1,6 @@
 #include "core.hpp"
 #include "flight.hpp"
+#include "input.hpp"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -40,9 +41,14 @@ void course(FlightMode mode, bool inverted, double scale, double direction) {
     if (direction < 0) for (auto& o : objects) { double left = -o.right; o.right = -o.left; o.left = left; }
     auto initial = state;
     std::vector<Action> macro;
+    InputPacer pacer;
+    pacer.reset(8);
     bool held = false;
     for (Tick tick = 0; tick < 900; ++tick) {
-        bool down = chooseFlightInput(state, objects);
+        state.holdRemaining = pacer.remainingFrames(tick) / 4.;
+        state.minHold = pacer.dwellFrames() / 4.;
+        bool down = pacer.apply(chooseFlightInput(state, objects), tick);
+        check(pacer.currentCps() <= 8, "Flight exceeded the configured CPS limit");
         if (down != held) { appendAction(macro, tick, down); held = down; }
         advance(state, down);
         if (!safe(state, objects)) {
@@ -81,9 +87,14 @@ int main() {
 
         for (auto mode : {FlightMode::Ship, FlightMode::Wave}) {
             s = {}; s.mode = mode; s.y = 35; s.top = 1400;
+            InputPacer pacer;
+            pacer.reset(8);
             Tick longest = 0, current = 0;
             for (int tick = 0; tick < 600; ++tick) {
-                bool down = chooseFlightInput(s, {});
+                s.holdRemaining = pacer.remainingFrames(tick) / 4.;
+                s.minHold = pacer.dwellFrames() / 4.;
+                bool down = pacer.apply(chooseFlightInput(s, {}), tick);
+                check(pacer.currentCps() <= 8, "Climb exceeded the configured CPS limit");
                 current = down ? current + 1 : 0;
                 longest = std::max(longest, current);
                 advance(s, down);
