@@ -188,7 +188,8 @@ void Runtime::inject(bool down) {
 
 void Runtime::beginAttempt() {
     releaseInput();
-    m_layer->unschedule(schedule_selector(PlayLayer::delayedResetLevel));
+    // delayedResetLevel has no float argument and is not a schedule selector.
+    // The PlayLayer hook suppresses stale native death callbacks while active.
     m_layer->m_clickBetweenSteps = false;
     m_layer->m_clickOnSteps = false;
     GameToolbox::fast_srand(GameSeed);
