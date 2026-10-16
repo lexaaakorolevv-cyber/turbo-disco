@@ -113,3 +113,5 @@ ctest --test-dir build-core --output-on-failure
 Windows x64 1.10.1 успешно собрана и прошла все одиннадцать наборов тестов: [Windows CI](https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38912388555). Контрольные суммы пакета проверены после скачивания.
 
 Windows x64 1.10.1: [успешная сборка и 11 наборов тестов](https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38914830352), исходники `df116e06ab17a4f9b0da3db92de54e4161110a1f`. Размер пакета: 349773 байт, SHA-256: `a7f538dca7d37b7dbf5cf40a60a1946c176d11b011c60c5a65cd1fd81a9c5298`. Игра и FPS здесь не проверены.
+
+Windows x64 1.11.0: [успешная сборка и 12 наборов тестов](https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38922774914), исходники `63d14260bde6d30432140b9b6798d84854ce2e51`. Размер: 374863 байт; SHA-256: `7a77f49eb7d9173d9f4fc36b678a7de038f6a29a23c650c3c738099fed16d6ec`. Настоящая игра, UI и FPS здесь не проверены.

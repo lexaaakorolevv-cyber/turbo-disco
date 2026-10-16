@@ -1,9 +1,11 @@
-# Route Finder 1.10.1 — Windows x64
+# Route Finder 1.11.0 — Analyze / Windows x64
 
-[Скачать .geode](local.routefinder-windows-x64-v1.10.1.geode?raw=true)
+[Скачать .geode](local.routefinder-windows-x64-v1.11.0.geode?raw=true)
 
-Для GD 2.2081 / Geode 5.11.1. Замените старый файл в Geometry Dash/geode/mods, перезапустите игру, пауза → BOT → новый поиск. Устранён обрыв прогноза общим render-бюджетом 1.10.0. Кнопки в паузе, в игре только рекорд; 16 CPS, dual и 2-player сохранены.
+Для GD 2.2081 / Geode 5.11.1. Закройте игру, замените прежний Route Finder .geode в Geometry Dash/geode/mods и перезапустите. Пауза → BOT → Analyze → дождитесь готовности → Готово → Найти прохождение. Начните новый поиск: прежняя версия окружения несовместима.
 
-[Windows CI и 11 наборов тестов](https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38914830352), исходники df116e06ab17a4f9b0da3db92de54e4161110a1f.
+Analyze строит карту объектов, переходов, связок и коридоров и использует результат при поиске. JSON сохраняется автоматически в каталоге сохранений мода. Кнопки остаются в паузе, в игре только лучший процент; 16 CPS, shared dual и независимый 2-player сохранены. Расширенный прогноз может требовать больше CPU на сложном участке; любые уровни не гарантируются.
 
-Размер: 349773 байт. SHA-256: `a7f538dca7d37b7dbf5cf40a60a1946c176d11b011c60c5a65cd1fd81a9c5298`. Сам игровой процесс и FPS здесь не проверены; любые уровни не гарантируются.
+[Windows CI и 12 наборов тестов](https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38922774914), исходники 63d14260bde6d30432140b9b6798d84854ce2e51.
+
+Размер: 374863 байт. SHA-256: `7a77f49eb7d9173d9f4fc36b678a7de038f6a29a23c650c3c738099fed16d6ec`. Настоящие игровой процесс, UI и FPS здесь не проверены.
