@@ -98,7 +98,6 @@ class $modify(RouteFinderGameLayer, GJBaseGameLayer) {
             rf::attachHud(current);
         }
         if (!runtime.owns(this)) { GJBaseGameLayer::update(dt); return; }
-        runtime.startRenderFrame();
         runtime.service();
         if (runtime.frozen() && runtime.levelReady()) return;
         if (!runtime.active()) { GJBaseGameLayer::update(dt); return; }

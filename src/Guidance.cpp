@@ -223,13 +223,14 @@ void Runtime::guideFlight(PlayerObject* player){
     bool committed=m_inputCommitment.sample(m_outerUpdates/4.,m_observation,contact,pendingFirst,dualEnabled()?&m_secondObservation:nullptr);
     if(twoPlayerEnabled()&&dualEnabled())committed=m_secondCommitment.sample(m_outerUpdates/4.,m_secondObservation,contact,pendingSecond,&m_observation)&&committed;
     if(committed){m_searchDesired=pendingFirst;m_searchDesired2=pendingSecond;m_cachedDesired=m_searchDesired;return;}
-    if(!m_planningBudget.available())return;
     bool firstNeeds=m_guidanceClock.needsPlan(m_outerUpdates,m_observation,events,m_inputEdges),secondNeeds=false;
     if(dualEnabled())secondNeeds=m_secondGuidanceClock.needsPlan(m_outerUpdates,m_secondObservation,
         m_layer->m_player2->m_ringRelatedSet.size()*16ULL+m_layer->m_player2->m_touchedRing,m_inputEdges2);
     if(m_smoothSearch&&!firstNeeds&&!secondNeeds){
         m_searchDesired=m_cachedDesired;return;
     }
+    // Complete the forecast atomically on the physics clock. A render-frame
+    // deadline must never select a short, blind route or preserve stale input.
     m_guidedFlight=true;
     auto s=m_calibration.adjusted(m_observation);
     double reach=std::abs(s.vx)*76+s.halfWidth;
@@ -242,7 +243,7 @@ void Runtime::guideFlight(PlayerObject* player){
     if(dualEnabled()){
         auto firstInteractions=m_interactions;
         collectInteractions(m_layer->m_player2,minX,maxX,second.y-450,second.y+450);m_secondInteractions=std::move(m_interactions);m_interactions=std::move(firstInteractions);
-        auto decision=chooseDualInput(s,second,m_flightObstacles,m_interactions,m_secondInteractions,&m_failures,false,twoPlayerEnabled(),&m_planningBudget);
+        auto decision=chooseDualInput(s,second,m_flightObstacles,m_interactions,m_secondInteractions,&m_failures,false,twoPlayerEnabled());
         if(!decision.plan.steps)return;
         m_inputCommitment.begin(decision.plan,m_outerUpdates/4.,m_observation,contact,&m_secondObservation);
         m_searchDesired=decision.down;m_searchDesired2=decision.secondDown;
@@ -255,7 +256,7 @@ void Runtime::guideFlight(PlayerObject* player){
     bool interactive=std::any_of(m_interactions.begin(),m_interactions.end(),[&](auto const&i){return std::abs((i.area.left+i.area.right)/2-s.x)<std::abs(s.vx)*42+s.halfWidth;});
     bool ramps=std::any_of(m_flightObstacles.begin(),m_flightObstacles.end(),[](auto const&o){return o.ramp;});
     if(interactive||ramps||(s.form!=Form::Cube&&s.form!=Form::Ship&&s.form!=Form::Wave)){
-        auto decision=chooseFormInput(s,m_flightObstacles,m_interactions,&m_failures,(static_cast<int>(policy%7)-3)*.07,false,&m_planningBudget);
+        auto decision=chooseFormInput(s,m_flightObstacles,m_interactions,&m_failures,(static_cast<int>(policy%7)-3)*.07,false);
         if(!decision.plan.steps)return;
         m_inputCommitment.begin(decision.plan,m_outerUpdates/4.,m_observation,contact);
         m_searchDesired=decision.down;if(m_showPreview)m_forecast=std::move(decision.forecast);
@@ -263,14 +264,14 @@ void Runtime::guideFlight(PlayerObject* player){
         GroundObservation g{s.x,s.y,s.vy,s.vx,s.halfWidth,s.halfHeight,player->m_isUpsideDown?1e6:m_spawnFloor,
             s.jump*(s.scale<.9?.8:1),s.gravity*s.gravityMod,m_inputPacer.remainingFrames(m_outerUpdates)/4.,s.grounded,s.inverted,s.held,s.pressInterval,s.pressRemaining};
         static constexpr double timing[]{0,-.25,.25,-.5,.5,-1,1,-1.5,1.5,-2,2};
-        m_searchDesired=chooseGroundInput(g,m_flightObstacles,timing[policy%11]+m_failures.timingBias(s),nullptr,&m_planningBudget).down;
+        m_searchDesired=chooseGroundInput(g,m_flightObstacles,timing[policy%11]+m_failures.timingBias(s),nullptr).down;
     }else{
         FlightObservation f;f.mode=s.form==Form::Wave?FlightMode::Wave:FlightMode::Ship;
         f.x=s.x;f.y=s.y;f.vy=s.vy;f.vx=s.vx;f.halfWidth=s.halfWidth;f.halfHeight=s.halfHeight;
         f.bottom=s.floor;f.top=s.ceiling;f.scale=s.scale;f.gravity=s.gravityMod;f.inverted=s.inverted;f.held=s.held;
         f.pressInterval=s.pressInterval;f.pressRemaining=s.pressRemaining;f.accelerationScales=s.acceleration;f.slopeScale=s.waveSlope;
         auto tuning=flightTuning(policy+1,m_seed);tuning.heightBias+=m_failures.heightBias(s);
-        m_searchDesired=chooseFlightInput(f,m_flightObstacles,tuning,nullptr,&m_failures,&m_planningBudget);
+        m_searchDesired=chooseFlightInput(f,m_flightObstacles,tuning,nullptr,&m_failures);
     }
     // Unsupported scripted/dash rings still activate only through ordinary
     // native input. Try an alternative policy; never call ringJump directly.

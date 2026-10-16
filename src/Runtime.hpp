@@ -54,7 +54,6 @@ public:
     void save();
     void load();
     void poll();
-    void startRenderFrame(){m_planningBudget.reset(m_smoothSearch?6000:12000,m_smoothSearch?3.:6.);}
     void service(); // Called only outside the game's update/reset stack.
     bool beforeTick(float dt, bool halfTick, bool lastTick);
     bool advanceOuterUpdate();
@@ -116,7 +115,6 @@ private:
     double m_robotTime = 0, m_observationTime = -1,m_robotTime2=0,m_observationTime2=-1;
     bool m_previousDual=false;
     bool m_showPreview = true,m_smoothSearch=true,m_cachedDesired=false;
-    PlanningBudget m_planningBudget;
     GuidanceClock m_guidanceClock,m_secondGuidanceClock;
     std::vector<geode::Ref<GameObject>> m_obstacleObjects,m_interactionObjects;
     unsigned m_sceneObjectCount=0;

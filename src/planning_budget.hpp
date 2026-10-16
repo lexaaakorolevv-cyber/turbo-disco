@@ -2,8 +2,9 @@
 #include <chrono>
 #include <cstdint>
 namespace rf {
-// A budget only limits approximate planning. It never drops native physics or
-// recorded input. Tests may use a deterministic node cap without a deadline.
+// Legacy limited planner for offline regression/benchmark comparisons only.
+// Live Runtime never supplies this: truncation changes decisions and makes
+// search depend on render FPS and machine speed.
 class PlanningBudget {
     unsigned m_left=0,m_used=0;
     bool m_timed=false,m_started=false;

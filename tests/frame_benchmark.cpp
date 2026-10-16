@@ -9,16 +9,16 @@ int main(){
  for(bool dual:{false,true}){
   std::vector<double> times;unsigned maximumNodes=0;
   for(int frame=0;frame<48;frame++){
-#ifndef RF_BASELINE
+#ifdef RF_LEGACY_FRAME_CAP
    PlanningBudget budget;budget.reset(6000,3.);
 #endif
    auto begin=std::chrono::steady_clock::now();
    for(int update=0;update<4;update++){
-#ifndef RF_BASELINE
+#ifdef RF_LEGACY_FRAME_CAP
     if(!budget.available())break;
 #endif
     FormState s;s.form=Form::Ufo;s.grounded=false;s.y=150+frame%12;s.floor=0;s.ceiling=300;s.x=frame%16;s.vy=(frame%9-4)*.6;auto second=s;second.y+=350;second.floor=350;second.ceiling=650;
-#ifdef RF_BASELINE
+#ifndef RF_LEGACY_FRAME_CAP
     if(dual)chooseDualInput(s,second,objects,{}, {},nullptr,false,true);else chooseFormInput(s,objects,{},nullptr,0,false);
 #else
     if(dual)chooseDualInput(s,second,objects,{}, {},nullptr,false,true,&budget);else chooseFormInput(s,objects,{},nullptr,0,false,&budget);
