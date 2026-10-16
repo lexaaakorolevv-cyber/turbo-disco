@@ -64,7 +64,7 @@ nlohmann::json Search::snapshot() const {
         check(actionCount <= 4 * MaxTicks,"Search session action budget exceeded; best macro remains usable");
         result["elites"].push_back({{"actions",compactPlan(e.actions)},{"death",e.deathTick},{"percent",e.percent},{"flight",e.flight},{"policy",e.policy},{"trials",e.trials},{"route_key",e.routeKey}});
     }
-    for (auto const& e : m_focusEdits) result["edits"].push_back({e.first,e.last,e.delta,e.release});
+    for (auto const& e : m_focusEdits) result["edits"].push_back({e.first,e.last,e.delta,e.release,e.tailDelta});
     result["checkpoints"]=json::array();
     for(auto const&c:m_checkpoints){
         actionCount+=c.actions.size();check(actionCount<=4*MaxTicks,"Checkpoint action budget exceeded");
@@ -94,13 +94,15 @@ Search Search::restore(nlohmann::json const& v) {
     check(s.m_focusBase.empty() || s.m_focusBase.back().tick<s.m_focusDeath,"Focus extends beyond its attempt");
     auto const& edits=v.at("edits"); check(edits.is_array() && edits.size()<=256,"Invalid focus queue size");
     for (auto const& e : edits) {
-        check(e.is_array() && e.size()==4 && e[2].is_number_integer() && e[3].is_boolean(),"Invalid focus edit");
+        check(e.is_array() && (e.size()==4||e.size()==5) && e[2].is_number_integer() && e[3].is_boolean(),"Invalid focus edit");
         check(!e[2].is_number_unsigned() || e[2].get<std::uint64_t>()<=128,"Focus delta overflows signed range");
         auto first=integer(e[0]),last=integer(e[1]); auto delta=e[2].get<std::int64_t>();
-        check(first<=last && last<s.m_focusBase.size() && delta>=-128 && delta<=128 && delta!=0,"Invalid focus edit bounds");
+        std::int64_t tail=0;if(e.size()==5){check(e[4].is_number_integer()&&e[4].get<double>()>=-128&&e[4].get<double>()<=128,"Invalid release offset");tail=e[4].get<std::int64_t>();}
+        check(first<=last && last<s.m_focusBase.size() && delta>=-128 && delta<=128 && (delta!=0||tail!=0),"Invalid focus edit bounds");
         bool release=e[3].get<bool>();
         check(!release || (delta<0 && s.m_focusBase[first].down && first==last && std::none_of(s.m_focusBase.begin()+last+1,s.m_focusBase.end(),[&](auto const&a){return a.player==s.m_focusBase[first].player;})),"Invalid release edit");
-        s.m_focusEdits.push_back({static_cast<std::size_t>(first),static_cast<std::size_t>(last),static_cast<int>(delta),release});
+        check(!tail||(!release&&first<last&&s.m_focusBase[first].down&&!s.m_focusBase[last].down&&s.m_focusBase[first].player==s.m_focusBase[last].player),"Invalid paired release repair");
+        s.m_focusEdits.push_back({static_cast<std::size_t>(first),static_cast<std::size_t>(last),static_cast<int>(delta),release,static_cast<int>(tail)});
     }
     auto const& elites=v.at("elites"); check(elites.is_array() && elites.size()<=ArchiveLimit,"Invalid archive size");
     std::size_t actionCount=s.m_focusBase.size(); double previous=101;

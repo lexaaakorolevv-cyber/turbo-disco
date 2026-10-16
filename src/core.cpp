@@ -238,7 +238,8 @@ void Search::observe(std::vector<Action> const& actions, Tick death, double perc
     if (std::any_of(m_elites.begin(), m_elites.end(), [&](Elite const& e) {
         return e.actions == candidate.actions;
     })) return;
-    if (improvement && !candidate.actions.empty()) {
+    if (!candidate.actions.empty() && (improvement ||
+        (percent + .25 >= m_elites.front().percent && (m_focusEdits.empty() || death > m_focusDeath)))) {
         // A compact queue of edits shares one immutable parent; do not retain
         // dozens of complete long-level macros just to shift a few ticks.
         m_focusBase = candidate.actions;
@@ -269,14 +270,14 @@ void Search::observe(std::vector<Action> const& actions, Tick death, double perc
         if (a.actions.size() != b.actions.size()) return a.actions.size() < b.actions.size();
         return a.deathTick > b.deathTick;
     });
-    // Retain several routes to the frontier instead of filling the archive
-    // entirely with near-identical failures at the same percentage.
+    // First retain one champion per coarse route, then fill spare slots with
+    // local variations. Lower-progress branches survive frontier crowding.
     std::vector<Elite> diverse;std::vector<bool> selected(m_elites.size());
     for(int pass=0;pass<2&&diverse.size()<ArchiveLimit;pass++)for(std::size_t i=0;i<m_elites.size();++i){
         if(selected[i])continue;auto const&elite=m_elites[i];auto bucket=static_cast<int>(elite.percent*4);
         auto count=std::count_if(diverse.begin(),diverse.end(),[&](auto const&e){return static_cast<int>(e.percent*4)==bucket;});
-        bool same=std::any_of(diverse.begin(),diverse.end(),[&](auto const&e){return static_cast<int>(e.percent*4)==bucket&&e.routeKey==elite.routeKey;});
-        if(count<4&&(pass||!same)){selected[i]=true;diverse.push_back(std::move(m_elites[i]));}if(diverse.size()==ArchiveLimit)break;
+        bool routePresent=std::any_of(diverse.begin(),diverse.end(),[&](auto const&e){return e.routeKey==elite.routeKey;});
+        if((!pass&&!routePresent)||(pass&&count<4)){selected[i]=true;diverse.push_back(std::move(m_elites[i]));}if(diverse.size()==ArchiveLimit)break;
     }
     std::stable_sort(diverse.begin(),diverse.end(),[](auto const&a,auto const&b){if(a.percent!=b.percent)return a.percent>b.percent;if(a.actions.size()!=b.actions.size())return a.actions.size()<b.actions.size();return a.deathTick>b.deathTick;});
     m_elites = std::move(diverse);
@@ -297,10 +298,30 @@ void Search::preferPlayer(int player){
     std::stable_sort(m_focusEdits.begin(),m_focusEdits.end(),[&](auto const&a,auto const&b){return (m_focusBase[a.first].player==player)>(m_focusBase[b.first].player==player);});
 }
 void Search::preferFailure(int player,Tick tick,int direction,bool duration){
+    // Joint press/release repairs cover narrow windows which neither a pure
+    // shift nor a duration-only edit can fix. Keep the successful prefix and
+    // every event on the other channel unchanged.
+    std::optional<std::size_t> target;Tick closest=MaxTicks;
+    for(std::size_t i=0;i<m_focusBase.size();++i){auto const&a=m_focusBase[i];if(a.player!=player||!a.down)continue;
+        auto release=i;for(auto j=i+1;j<m_focusBase.size();++j)if(m_focusBase[j].player==player){release=j;break;}
+        auto anchor=duration&&release!=i?m_focusBase[release].tick:a.tick;
+        auto distance=anchor>tick?anchor-tick:tick-anchor;
+        if(distance<closest){target=i;closest=distance;}
+    }
+    if(target){auto first=*target,last=first;
+        for(auto j=first+1;j<m_focusBase.size();++j)if(m_focusBase[j].player==player){last=j;break;}
+        if(last!=first)for(int shift:{-4,-2,-1,0,1,2,4})for(int length:{-4,-2,-1,1,2,4}){
+            if(m_focusEdits.size()>=256)break;
+            bool exists=std::any_of(m_focusEdits.begin(),m_focusEdits.end(),[&](auto const&e){return e.first==first&&e.last==last&&e.delta==shift&&e.tailDelta==length&&!e.release;});
+            if(!exists)m_focusEdits.push_back({first,last,shift,false,length});
+        }
+    }
     auto rank=[&](auto const&e){auto const&a=m_focusBase[e.first];
         auto distance=a.tick>tick?a.tick-tick:tick-a.tick;
         bool preferredDuration=duration&&(e.release||e.first==e.last&&!a.down);
-        return std::tuple{a.player!=player,duration&&!preferredDuration,distance,direction&&e.delta*direction<=0,std::abs(e.delta)};};
+        auto relevant=duration?e.delta+e.tailDelta:e.delta;
+        return std::tuple{a.player!=player,distance,direction&&relevant*direction<=0,
+            std::abs(e.delta)+std::abs(e.tailDelta),duration&&!preferredDuration};};
     std::stable_sort(m_focusEdits.begin(),m_focusEdits.end(),[&](auto const&a,auto const&b){return rank(a)<rank(b);});
 }
 bool Search::issue(std::vector<Action> const& actions) {
@@ -355,14 +376,15 @@ std::vector<Action> Search::next(Tick limit) {
         auto firstIndex=edit.first,lastIndex=edit.last;
         while(lastIndex>firstIndex&&m_focusBase[lastIndex].player!=channel)--lastIndex;
         auto first=static_cast<std::int64_t>(m_focusBase[firstIndex].tick)+edit.delta;
-        auto last=static_cast<std::int64_t>(m_focusBase[lastIndex].tick)+edit.delta;
+        auto last=static_cast<std::int64_t>(m_focusBase[lastIndex].tick)+edit.delta+edit.tailDelta;
         Tick low=0,high=limit-1;
         for(auto i=firstIndex;i-->0;)if(m_focusBase[i].player==channel){low=m_focusBase[i].tick+1;break;}
         for(auto i=lastIndex+1;i<m_focusBase.size();++i)if(m_focusBase[i].player==channel){high=m_focusBase[i].tick-1;break;}
-        if(first<static_cast<std::int64_t>(low)||last>static_cast<std::int64_t>(high))continue;
+        if(first<static_cast<std::int64_t>(low)||last>static_cast<std::int64_t>(high)||last<first||(lastIndex!=firstIndex&&last==first))continue;
         auto result=m_focusBase;
         for(auto i=firstIndex;i<=lastIndex;++i)if(result[i].player==channel)
             result[i].tick=static_cast<Tick>(static_cast<std::int64_t>(result[i].tick)+edit.delta);
+        result[lastIndex].tick=static_cast<Tick>(last);
         std::stable_sort(result.begin(),result.end(),[](auto const&a,auto const&b){return a.tick<b.tick||(a.tick==b.tick&&a.player<b.player);});
         m_policy = m_focusPolicy;
         m_guidanceFrom = std::min(limit, std::max(m_focusDeath + 1, result.back().tick + 1));
@@ -374,7 +396,7 @@ std::vector<Action> Search::next(Tick limit) {
         std::size_t parentIndex=0;
         if(generation%3==2){
             if(m_stale<8)parentIndex=m_rng()%m_elites.size();
-            else for(std::size_t i=1;i<m_elites.size();++i)if(m_elites[i].percent+2>=m_elites.front().percent&&m_elites[i].trials<m_elites[parentIndex].trials)parentIndex=i;
+            else for(std::size_t i=1;i<m_elites.size();++i)if((m_stale>=24||m_elites[i].percent+2>=m_elites.front().percent)&&m_elites[i].trials<m_elites[parentIndex].trials)parentIndex=i;
         }
         ++m_elites[parentIndex].trials;auto const& parent=m_elites[parentIndex];
         bool independent=m_independent||std::any_of(parent.actions.begin(),parent.actions.end(),[](auto const&a){return a.player==2;});
@@ -387,7 +409,7 @@ std::vector<Action> Search::next(Tick limit) {
         Tick start = death > back ? death - back : 0;
         auto kind = generation % 6;
         m_policy = (parent.policy+generation * 17 + generation / 6) % 99;
-        if (m_stale >= 32 && m_choices % 8 == 0) {
+        if (m_stale >= 32 && m_choices % 8 == 1) {
             // Sample a complete tail from a wider rollback, rather than
             // repeatedly changing one ineffective input at the same frontier.
             start = death > window ? death - window : 0;

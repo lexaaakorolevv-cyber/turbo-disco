@@ -190,3 +190,10 @@ Local 13 suites passed (20.89 s) before packaging. The historical capped-render 
 
 
 Windows x64 **1.12.0**: [CI run](https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38956056935), исходники `25c380444e3f5a4ff4b61fa41327ef2402b2aec6`. Все 13 наборов тестов под MSVC, сборка Geode SDK 5.11.1 / GD 2.2081, упаковка и PE x64 прошли. Архив CI сверен с digest GitHub; пакет — с внутренним SHA256SUMS. Размер .geode: 388932 байт; SHA-256: `621f3b7fa41c6a47b700c7c99c7e4ce1709f74977c2d88295eb992468a7c4ac8`. Настоящая игра, UI и FPS здесь не проверены.
+
+
+## 1.13.0 — adaptive repairs, validation and branch preservation
+
+New fourteenth suite routefinder-adaptive covers 48 combined press/hold errors with an independent exact timing gate, prefix and other-player preservation, paired queue JSON recovery and malformed offsets; held-out calibration error, single-outlier rejection, sustained regime recovery, disturbed samples, unseen multi-step trajectory improvement, quarantine of inaccurate imported estimates and deterministic continuation after JSON recovery; retention and actual reselection of a lower-progress alternative after frontier crowding/stagnation. The old 32 single-variable near-misses still pass with the same total 480 attempts/worst 26.
+
+The pre-update 1.12.0 core fails the new sustained-regime calibration test and, when tested separately, the combined press/hold timing gate. All fourteen final suites passed locally in Release (21.64 seconds); the new 48-case coupled gate took 282 attempts total, worst 15. The work added per-observation fixed-size validation, not extra real-time forecast calls. Existing render independence, checkpoint replay validation, 16 CPS, dual and native replay certification tests remain required. Real GD gameplay/UI/FPS cannot be checked in this environment. Windows SDK build and all fourteen suites must pass before distributing the new binary.

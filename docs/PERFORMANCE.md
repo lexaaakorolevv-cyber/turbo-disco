@@ -1,3 +1,7 @@
+# Дополнение 1.13.0
+
+Калибровка хранит фиксированные 32×8 оценок с ошибкой независимой проверки и коротким счётчиком смены режима. На наблюдение обновляется только применимый коэффициент; дополнительные прогнозы или проходы по объектам для обучения не запускаются. Отбор до 24 маршрутов и сортировка до 256 правок выполняются после смерти/между попытками. Ширина луча, горизонт и частота игрового планирования в этой версии не увеличены. Профиль FPS в настоящей игре недоступен.
+
 # Engine 1.12.0
 
 No gameplay HUD/UI changes. Main flight beam stays 64; near a predicted dead end (<8 native units) one bounded diverse rescue may run. Generic beam capacity remains 64/128 rescue, with compatible spare slots filled. An airborne cube/robot forecast may extend from 42 to at most 66 native units to inspect landing. No render deadline truncates decisions. Extra planning can cost CPU; no real-game FPS guarantee is made.

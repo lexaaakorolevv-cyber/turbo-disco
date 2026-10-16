@@ -29,7 +29,11 @@ struct PhysicsSample {
     bool disturbed=false;
 };
 class Calibration {
-    struct Estimate { double ratio=1; unsigned samples=0; double deviation=0; };
+    struct Estimate {
+        double ratio=1; unsigned samples=0; double deviation=0;
+        double baselineError=0,learnedError=0;
+        unsigned checks=0,drift=0;double driftRatio=1;
+    };
     struct Bucket { std::array<Estimate,8> values; };
     std::array<Bucket,32> m_buckets{};
     std::optional<PhysicsSample> m_previous;

@@ -16,6 +16,20 @@ void Calibration::observe(PhysicsSample const& current){
         if(std::abs(expected)<1e-6)return;double ratio=measured/expected;
         if(!std::isfinite(ratio)||ratio<.65||ratio>1.35)return;
         auto&e=m_buckets[key(a)].values[slot];double difference=ratio-e.ratio;
+        // Validate on the next native observation before fitting that sample.
+        // A learned correction is used only while it predicts at least as
+        // accurately as the default coefficient on these held-out samples.
+        double weight=e.checks?.1:1.;
+        e.baselineError+=(std::abs(ratio-1)-e.baselineError)*weight;
+        e.learnedError+=(std::abs(difference)-e.learnedError)*weight;
+        e.checks=std::min(e.checks+1,100000u);
+        // Recover from a sustained new regime; one collision/impulse cannot
+        // replace an established estimate. Require eight consistent samples.
+        if(e.samples>=8&&std::abs(difference)>.06){
+            if(!e.drift||std::abs(ratio-e.driftRatio)>.03){e.drift=1;e.driftRatio=ratio;}
+            else {e.driftRatio+=(ratio-e.driftRatio)/++e.drift;}
+            if(e.drift>=8){e.ratio=e.driftRatio;e.samples=0;e.deviation=0;e.checks=0;e.baselineError=e.learnedError=0;e.drift=0;difference=ratio-e.ratio;}
+        }else e.drift=0;
         // A single odd sample cannot move an established estimate abruptly.
         e.deviation=e.samples?e.deviation*.9+std::abs(difference)*.1:0;
         if(e.samples>=4)difference=std::clamp(difference,-.08,.08);
@@ -55,17 +69,23 @@ void Calibration::observe(PhysicsSample const& current){
 }
 FormState Calibration::adjusted(FormState s)const{
     auto const&v=m_buckets[key(s)].values;
-    auto ratio=[&](int i){return v[i].samples>=4&&v[i].deviation<.12?v[i].ratio:1.;};
+    auto ratio=[&](int i){auto const&e=v[i];return e.samples>=4&&e.checks>=4&&e.deviation<.12&&e.learnedError<=e.baselineError+.005?e.ratio:1.;};
     for(int i=0;i<4;i++)s.acceleration[i]=ratio(i);
     s.gravity*=ratio(4);s.jump*=ratio(5);s.waveSlope*=ratio(6);if(s.form==Form::Robot)s.robotHold*=ratio(7);else s.controlScale*=ratio(7);return s;
 }
 unsigned Calibration::samples()const{unsigned n=0;for(auto const&b:m_buckets)for(auto const&e:b.values)n+=e.samples;return n;}
-nlohmann::json Calibration::toJson()const{auto j=nlohmann::json::array();for(auto const&b:m_buckets){auto row=nlohmann::json::array();for(auto const&e:b.values)row.push_back({e.ratio,e.samples,e.deviation});j.push_back(row);}return j;}
+nlohmann::json Calibration::toJson()const{auto j=nlohmann::json::array();for(auto const&b:m_buckets){auto row=nlohmann::json::array();for(auto const&e:b.values)row.push_back({e.ratio,e.samples,e.deviation,e.baselineError,e.learnedError,e.checks,e.drift,e.driftRatio});j.push_back(row);}return j;}
 Calibration Calibration::fromJson(nlohmann::json const&j){
     Calibration c;if(!j.is_array()||j.size()!=32)throw std::runtime_error("Invalid calibration size");
     for(int i=0;i<32;i++){if(!j[i].is_array()||(j[i].size()!=7&&j[i].size()!=8))throw std::runtime_error("Invalid calibration row");for(int k=0;k<static_cast<int>(j[i].size());k++){
-        auto const&r=j[i][k];if(!r.is_array()||(r.size()!=2&&r.size()!=3)||!r[1].is_number_integer()||r[1].get<double>()<0||r[1].get<double>()>100000)throw std::runtime_error("Invalid calibration count");
-        double value=r[0].get<double>();if(!std::isfinite(value)||value<.65||value>1.35)throw std::runtime_error("Invalid calibration ratio");double deviation=r.size()==3?r[2].get<double>():0;if(!std::isfinite(deviation)||deviation<0||deviation>1)throw std::runtime_error("Invalid calibration deviation");c.m_buckets[i].values[k]={value,r[1].get<unsigned>(),deviation};}}
+        auto const&r=j[i][k];if(!r.is_array()||(r.size()!=2&&r.size()!=3&&r.size()!=8)||!r[1].is_number_integer()||r[1].get<double>()<0||r[1].get<double>()>100000)throw std::runtime_error("Invalid calibration count");
+        double value=r[0].get<double>();if(!std::isfinite(value)||value<.65||value>1.35)throw std::runtime_error("Invalid calibration ratio");double deviation=r.size()>=3?r[2].get<double>():0;if(!std::isfinite(deviation)||deviation<0||deviation>1)throw std::runtime_error("Invalid calibration deviation");auto&e=c.m_buckets[i].values[k];e={value,r[1].get<unsigned>(),deviation};
+        if(r.size()==8){
+            for(int n:{3,4,7})if(!r[n].is_number()||!std::isfinite(r[n].get<double>()))throw std::runtime_error("Invalid calibration validation");
+            if(r[3].get<double>()<0||r[3].get<double>()>1||r[4].get<double>()<0||r[4].get<double>()>1||r[7].get<double>()<.65||r[7].get<double>()>1.35)throw std::runtime_error("Invalid calibration validation range");
+            for(int n:{5,6})if(!r[n].is_number_integer()||r[n].get<double>()<0||r[n].get<double>()>(n==5?100000:7))throw std::runtime_error("Invalid calibration validation count");
+            e.baselineError=r[3];e.learnedError=r[4];e.checks=r[5];e.drift=r[6];e.driftRatio=r[7];
+        }}}
     return c;
 }
 void MotionTracker::update(Obstacle&o,double time){
