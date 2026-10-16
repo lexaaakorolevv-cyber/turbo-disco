@@ -6,7 +6,7 @@ namespace rf {
 namespace {
 std::optional<MapObject> mapObject(GameObject* object){
     MapObject result;result.x=object->getPositionX();result.y=object->getPositionY();
-    result.uncertain=object->m_groupCount>0||object->m_isGroupDisabled||object->m_isDisabled;
+    result.uncertain=object->m_groupCount>0||object->m_isGroupDisabled||object->m_isDisabled||object->m_isNoTouch||object->m_isPassable;
     switch(object->m_objectType){
     case GameObjectType::Solid:case GameObjectType::Breakable:result.kind=MapKind::Solid;break;
     case GameObjectType::Slope:result.kind=object->m_slopeIsHazard?MapKind::Hazard:MapKind::Solid;break;
@@ -38,6 +38,9 @@ std::optional<MapObject> mapObject(GameObject* object){
         return std::nullopt;
     }
     if(!std::isfinite(result.x)||!std::isfinite(result.y))return std::nullopt;
+    // Match live collision collection: a passable/no-touch decoration must
+    // not close a corridor in the structural graph.
+    if((result.kind==MapKind::Solid||result.kind==MapKind::Hazard)&&(object->m_isNoTouch||object->m_isPassable))return std::nullopt;
     if(result.kind==MapKind::Solid||result.kind==MapKind::Hazard){auto r=object->getObjectRect();result.bounds=MapRect{r.getMinX(),r.getMaxX(),r.getMinY(),r.getMaxY()};}
     return result;
 }
