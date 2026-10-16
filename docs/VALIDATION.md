@@ -177,3 +177,5 @@ Windows x64 **1.11.0**: [CI run](https://github.com/lexaaakorolevv-cyber/turbo-d
 ## 1.11.1 — invalidation after native impulses
 
 A new regression fails on the previous version: same-outer-update velocity jumps retained cached input. Guidance now invalidates on vertical velocity/gravity-modifier/ring-arming changes, cooldown expiry and explicit pad/contact signatures for both players. Committed short plans invalidate on abrupt non-wave velocity impulses relative to the preceding observation; ordinary gravity and intended wave turns remain valid. Targeted mode/performance/routes/analysis/render-regression suites are used; game-level performance claims require native GD validation.
+
+Windows 1.11.1: CI https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38925142271; source 999331346fbfe216637beef31ddcf79735d3d4ee. All 12 suites, SDK build and PE x64 passed. Package 375676 bytes; SHA-256 cf5b4438275f2fab25054d99462432f2ed928ac843571c5de7ad1edb9c906542. Actual GD gameplay/FPS unavailable.

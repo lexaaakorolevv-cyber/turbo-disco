@@ -115,3 +115,5 @@ Windows x64 1.10.1 успешно собрана и прошла все один
 Windows x64 1.10.1: [успешная сборка и 11 наборов тестов](https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38914830352), исходники `df116e06ab17a4f9b0da3db92de54e4161110a1f`. Размер пакета: 349773 байт, SHA-256: `a7f538dca7d37b7dbf5cf40a60a1946c176d11b011c60c5a65cd1fd81a9c5298`. Игра и FPS здесь не проверены.
 
 Windows x64 1.11.0: [успешная сборка и 12 наборов тестов](https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38922774914), исходники `63d14260bde6d30432140b9b6798d84854ce2e51`. Размер: 374863 байт; SHA-256: `7a77f49eb7d9173d9f4fc36b678a7de038f6a29a23c650c3c738099fed16d6ec`. Настоящая игра, UI и FPS здесь не проверены.
+
+Windows 1.11.1: CI https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38925142271; source 999331346fbfe216637beef31ddcf79735d3d4ee. All 12 suites, SDK build and PE x64 passed. Package 375676 bytes; SHA-256 cf5b4438275f2fab25054d99462432f2ed928ac843571c5de7ad1edb9c906542. Actual GD gameplay/FPS unavailable.

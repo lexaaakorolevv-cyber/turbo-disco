@@ -1,11 +1,7 @@
-# Route Finder 1.11.0 — Analyze / Windows x64
+# Route Finder 1.11.1 — Windows x64
 
-[Скачать .geode](local.routefinder-windows-x64-v1.11.0.geode?raw=true)
+[Download](local.routefinder-windows-x64-v1.11.1.geode?raw=true)
 
-Для GD 2.2081 / Geode 5.11.1. Закройте игру, замените прежний Route Finder .geode в Geometry Dash/geode/mods и перезапустите. Пауза → BOT → Analyze → дождитесь готовности → Готово → Найти прохождение. Начните новый поиск: прежняя версия окружения несовместима.
+Test build: invalidate stale guidance after pad/orb impulses and contacts. Replace the previous package, restart and begin a new search. GD 2.2081 / Geode 5.11.1.
 
-Analyze строит карту объектов, переходов, связок и коридоров и использует результат при поиске. JSON сохраняется автоматически в каталоге сохранений мода. Кнопки остаются в паузе, в игре только лучший процент; 16 CPS, shared dual и независимый 2-player сохранены. Расширенный прогноз может требовать больше CPU на сложном участке; любые уровни не гарантируются.
-
-[Windows CI и 12 наборов тестов](https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38922774914), исходники 63d14260bde6d30432140b9b6798d84854ce2e51.
-
-Размер: 374863 байт. SHA-256: `7a77f49eb7d9173d9f4fc36b678a7de038f6a29a23c650c3c738099fed16d6ec`. Настоящие игровой процесс, UI и FPS здесь не проверены.
+Windows 1.11.1: CI https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38925142271; source 999331346fbfe216637beef31ddcf79735d3d4ee. All 12 suites, SDK build and PE x64 passed. Package 375676 bytes; SHA-256 cf5b4438275f2fab25054d99462432f2ed928ac843571c5de7ad1edb9c906542. Actual GD gameplay/FPS unavailable.
