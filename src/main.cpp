@@ -68,10 +68,10 @@ class $modify(RouteFinderPlayLayer, PlayLayer) {
         PlayLayer::delayedResetLevel();
     }
     void destroyPlayer(PlayerObject* player, GameObject* object) {
-        auto wasDead = m_player1 && m_player1->m_isDead;
+        auto wasDead = (m_player1 && m_player1->m_isDead)||(m_gameState.m_isDualMode&&m_player2&&m_player2->m_isDead);
         PlayLayer::destroyPlayer(player, object);
-        if (!wasDead && m_player1 && m_player1->m_isDead && rf::Runtime::get().owns(this))
-            rf::Runtime::get().died(object);
+        if (!wasDead && ((m_player1&&m_player1->m_isDead)||(m_gameState.m_isDualMode&&m_player2&&m_player2->m_isDead)) && rf::Runtime::get().owns(this))
+            rf::Runtime::get().died(object,player);
     }
     void levelComplete() {
         auto& runtime = rf::Runtime::get();

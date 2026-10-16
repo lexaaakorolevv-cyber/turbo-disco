@@ -14,6 +14,7 @@ struct FormState {
     double floor=91,ceiling=1e6,scale=1,gravity=1,jump=11.18,gravityMod=1;
     double pressRemaining=0,pressInterval=3.75,robotTime=0;
     bool grounded=true,inverted=false,held=false;
+    bool ringArmed=true,boundary=false;
     std::array<double,4> acceleration{1,1,1,1};
     double waveSlope=1;
 };

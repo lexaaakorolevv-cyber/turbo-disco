@@ -57,3 +57,11 @@ Geode UI и файловые API проверены по [исходникам S
 ## Дополнения 1.7.0
 
 Оформление использует уже проверенные `CCDrawNode::drawPolygon/drawSegment/drawDot`, `CCMenuItemSpriteExtra::create` и реальное поле `m_scaleMultiplier`, `CCLabelTTF::getString/setString`. Для линии используются настоящие `CCNode::nodeToWorldTransform/worldToNodeTransform` и `CCPointApplyAffineTransform`; матрицы берутся один раз на обновление линии. Списки объектов удерживаются через Geode `Ref<GameObject>`, очищаются при выходе и пересобираются после reset/изменения размера native `m_objects`. Значения геометрии между разными outer updates не кэшируются.
+
+## Адаптер 1.8.0
+
+В закреплённых bindings проверен виртуальный `GameObject::hasBeenActivatedByPlayer(PlayerObject*)` (реализация `EffectGameObject`, Windows 0x1a4af0), а также `PlayerObject::m_ringRelatedSet`. Первый проверяет активацию интерактивного объекта конкретным игроком, второй хранит уже активированные орбы. Контактный `m_touchedRings` больше не используется как список активированных орбов; глобальный `m_isActivated` не исключает объект для второго персонажа.
+
+Shared-dual использует реальный `m_gameState.m_isDualMode`, `m_player2` и один native `handleButton(down,1,false)`. `m_twoPlayerMode` явно отклоняется. Оба персонажа читаются отдельно, их физическое состояние не присваивается и не восстанавливается.
+
+Светлое меню использует `Popup::init(460,300)`, масштабирование `m_mainLayer` по размеру окна, настоящий `geode::openSettingsPopup(Mod::get())` из `GeodeUI.hpp` и прежние cocos примитивы. Меню разделено на три вкладки; изменение масштаба сохраняет anchor point штатного popup.

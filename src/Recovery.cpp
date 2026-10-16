@@ -22,8 +22,9 @@ bool Runtime::restoreSearch() {
             if (saved.best.environment!=m_environment || saved.seed!=m_seed ||
                 saved.search.window()!=static_cast<Tick>(Mod::get()->getSettingValue<int64_t>("mutation-window")))
                 throw std::runtime_error("Changed level/environment/seed/search window");
-            Calibration calibration; FailureMemory failures;
+            Calibration calibration,secondCalibration; FailureMemory failures;
             if(payload.contains("learning"))calibration=Calibration::fromJson(payload.at("learning"));
+            if(payload.contains("learning_player2"))secondCalibration=Calibration::fromJson(payload.at("learning_player2"));
             if(payload.contains("failures"))failures=FailureMemory::fromJson(payload.at("failures"));
             Tick guidance=saved.search.guidanceFrom();
             if(payload.contains("pending_guidance")){
@@ -31,7 +32,7 @@ bool Runtime::restoreSearch() {
                 if(!v.is_number_integer()||v.get<double>()<0||v.get<double>()>MaxTicks)throw std::runtime_error("Invalid pending guidance");
                 guidance=v.get<Tick>();
             }
-            m_calibration=std::move(calibration);m_failures=std::move(failures);
+            m_calibration=std::move(calibration);m_secondCalibration=std::move(secondCalibration);m_failures=std::move(failures);
             m_best=std::move(saved.best);
             m_previousAttempts=saved.attempts; m_previousSeconds=saved.seconds;
             m_search=std::make_unique<Search>(std::move(saved.search));
@@ -89,7 +90,7 @@ void Runtime::autosaveSearch(bool force) {
         auto pending=m_mode==Mode::Assisting?prefix(m_trial.actions,m_tick):m_plan;
         auto saved=searchSessionJson(draft,*m_search,pending,m_seed,m_previousAttempts+m_attempts,
             m_previousSeconds+elapsedSeconds());
-        saved["learning"]=m_calibration.toJson();saved["failures"]=m_failures.toJson();
+        saved["learning"]=m_calibration.toJson();saved["learning_player2"]=m_secondCalibration.toJson();saved["failures"]=m_failures.toJson();
         saved["pending_guidance"]=m_mode==Mode::Assisting?m_tick:m_flightFrom;
         saveJsonFile(sessionPath(),saved,-1);
         m_autosaveDirty=false;

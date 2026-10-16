@@ -17,6 +17,7 @@ struct Obstacle {
     int vertexCount = 0;
     double vx = 0, vy = 0, motionHorizon = 0;
     std::uint64_t id = 0;
+    bool ramp=false;
 };
 struct Forecast {
     std::vector<Point> path;

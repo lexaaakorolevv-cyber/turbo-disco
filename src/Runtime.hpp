@@ -46,6 +46,8 @@ public:
     void togglePreview() { m_showPreview = !m_showPreview;geode::Mod::get()->setSettingValue<bool>("show-preview",m_showPreview); }
     bool showPreview() const { return m_showPreview && m_mode == Mode::Searching; }
     Forecast const& forecast() const { return m_forecast; }
+    Forecast const& secondForecast() const { return m_secondForecast; }
+    bool dualEnabled() const {return m_layer&&m_layer->m_gameState.m_isDualMode;}
     PlayLayer* layer() const { return m_layer; }
     void play();
     void stop(std::string reason = "Остановлено пользователем");
@@ -56,7 +58,7 @@ public:
     bool beforeTick(float dt, bool halfTick, bool lastTick);
     bool advanceOuterUpdate();
     bool humanInput(bool down, int button, bool inputSide);
-    void died(GameObject* object = nullptr);
+    void died(GameObject* object = nullptr,PlayerObject* deadPlayer = nullptr);
     bool completed(); // Whether to call native levelComplete.
     void unexpectedReset();
     std::string summary() const;
@@ -94,26 +96,28 @@ private:
     bool m_guidedFlight = false;
     bool m_searchDesired = false;
     InputPacer m_inputPacer;
+    InputCommitment m_inputCommitment;
     std::vector<FlightObstacle> m_flightObstacles;
     double m_spawnFloor = 90;
-    Calibration m_calibration;
+    Calibration m_calibration,m_secondCalibration;
     FailureMemory m_failures;
     MotionTracker m_motion;
-    FormState m_observation;
-    Forecast m_forecast;
-    std::vector<Interaction> m_interactions;
+    FormState m_observation,m_secondObservation;
+    Forecast m_forecast,m_secondForecast;
+    std::vector<Interaction> m_interactions,m_secondInteractions;
     std::uint64_t m_inputEdges = 0;
-    double m_robotTime = 0, m_observationTime = -1;
+    double m_robotTime = 0, m_observationTime = -1,m_robotTime2=0,m_observationTime2=-1;
+    bool m_previousDual=false;
     bool m_showPreview = true,m_smoothSearch=true,m_cachedDesired=false;
-    GuidanceClock m_guidanceClock;
+    GuidanceClock m_guidanceClock,m_secondGuidanceClock;
     std::vector<geode::Ref<GameObject>> m_obstacleObjects,m_interactionObjects;
     unsigned m_sceneObjectCount=0;
     void rebuildSceneCache();
     std::string m_guidanceNote, m_lastFailure;
     FormState readState(PlayerObject* player) const;
     void updateIntelligence(PlayerObject* player);
-    void collectInteractions(double minX, double maxX, double minY, double maxY);
-    void rememberFailure(GameObject* object);
+    void collectInteractions(PlayerObject* player,double minX, double maxX, double minY, double maxY);
+    void rememberFailure(GameObject* object,PlayerObject* deadPlayer);
 
     std::string unsupported() const;
     std::string readinessError() const;

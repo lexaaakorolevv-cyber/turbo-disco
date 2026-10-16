@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <filesystem>
 #include <random>
 #include <string>
@@ -12,7 +13,7 @@
 namespace rf {
 using Tick = std::uint64_t;
 inline constexpr Tick MaxTicks = 240 * 1800;
-inline constexpr char ModVersion[] = "1.7.0";
+inline constexpr char ModVersion[] = "1.8.0";
 
 struct Action {
     Tick tick = 0;
@@ -24,10 +25,16 @@ struct Action {
 
 // A pre-input sample, taken at the same processCommands boundary on both runs.
 // This is a desync detector, never a state restoration mechanism.
+struct PlayerSample {
+    double x=0,y=0,vy=0,speed=0,size=0;
+    std::uint32_t flags=0;
+    bool operator==(PlayerSample const&) const=default;
+};
 struct Sample {
     Tick tick = 0;
     double x = 0, y = 0, vy = 0, speed = 0, size = 0, dt = 0;
     std::uint32_t flags = 0;
+    std::optional<PlayerSample> second;
     bool operator==(Sample const&) const = default;
 };
 

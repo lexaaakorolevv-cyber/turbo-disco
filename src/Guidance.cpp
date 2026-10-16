@@ -20,7 +20,7 @@ void Runtime::rebuildSceneCache(){
         case GameObjectType::CubePortal:case GameObjectType::ShipPortal:case GameObjectType::BallPortal:
         case GameObjectType::UfoPortal:case GameObjectType::WavePortal:case GameObjectType::RobotPortal:
         case GameObjectType::SpiderPortal:case GameObjectType::SwingPortal:case GameObjectType::RegularSizePortal:
-        case GameObjectType::MiniSizePortal:case GameObjectType::DashRing:case GameObjectType::GravityDashRing:
+        case GameObjectType::MiniSizePortal:case GameObjectType::DualPortal:case GameObjectType::SoloPortal:case GameObjectType::DashRing:case GameObjectType::GravityDashRing:
         case GameObjectType::CustomRing:case GameObjectType::TeleportOrb:case GameObjectType::TeleportPortal:
             m_interactionObjects.emplace_back(object);break;
         case GameObjectType::Modifier:{auto id=object->m_objectID;if(id==200||id==201||id==202||id==203||id==1334)m_interactionObjects.emplace_back(object);break;}
@@ -89,6 +89,7 @@ void Runtime::collectObstacles(double minX, double maxX, double minY, double max
         if (!std::isfinite(obstacle.left) || !std::isfinite(obstacle.right) || !std::isfinite(obstacle.bottom) ||
             !std::isfinite(obstacle.top) || obstacle.right < minX - 100 || obstacle.left > maxX + 100 ||
             obstacle.top < minY - 100 || obstacle.bottom > maxY + 100) continue;
+        obstacle.ramp=type==GameObjectType::Slope&&obstacle.solid;
         obstacle.id = static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(object));
         m_motion.update(obstacle,m_outerUpdates / 4.);
         m_flightObstacles.push_back(obstacle);
@@ -96,7 +97,7 @@ void Runtime::collectObstacles(double minX, double maxX, double minY, double max
     if (m_flightObstacles.size() > 512) {
         double x = m_layer->m_player1->getPositionX();
         std::stable_sort(m_flightObstacles.begin(), m_flightObstacles.end(), [&](auto const& a, auto const& b) {
-            return std::abs((a.left + a.right) / 2 - x) < std::abs((b.left + b.right) / 2 - x);
+            auto distance=[&](auto const&o){double d=std::abs((o.left+o.right)/2-x);return dualEnabled()&&m_layer->m_player2?std::min(d,std::abs((o.left+o.right)/2-m_layer->m_player2->getPositionX())):d;};return distance(a)<distance(b);
         });
         m_flightObstacles.resize(512);
     }
@@ -113,34 +114,37 @@ FormState Runtime::readState(PlayerObject* p) const {
     s.scale=p->m_vehicleSize;s.inverted=p->m_isUpsideDown;s.grounded=p->m_isOnGround;s.held=m_held;
     s.gravity=std::abs(p->m_gravity);s.gravityMod=std::clamp(static_cast<double>(std::abs(p->m_gravityMod)),.05,10.);
     s.jump=std::abs(p->m_yStart);s.floor=m_spawnFloor;s.ceiling=1e6;
-    if(s.form!=Form::Cube&&s.form!=Form::Robot){
+    if(dualEnabled()||s.form!=Form::Cube&&s.form!=Form::Robot){
         double bottom=m_layer->getMinPortalY(),top=m_layer->getMaxPortalY();
         if(std::isfinite(bottom)&&std::isfinite(top)&&top-bottom>2*s.halfHeight+8&&s.y>=bottom-30&&s.y<=top+30){s.floor=bottom;s.ceiling=top;}
         else if(s.form==Form::Ship||s.form==Form::Wave||s.form==Form::Ufo||s.form==Form::Swing){s.floor=s.y-150;s.ceiling=s.y+150;}
     }
     s.pressRemaining=m_inputPacer.pressRemainingFrames(m_outerUpdates)/4.;
-    s.pressInterval=m_inputPacer.pressIntervalFrames()/4.;s.robotTime=m_robotTime;return s;
+    s.pressInterval=m_inputPacer.pressIntervalFrames()/4.;s.robotTime=p==m_layer->m_player2?m_robotTime2:m_robotTime;s.ringArmed=!p->m_touchedRing;return s;
 }
 void Runtime::updateIntelligence(PlayerObject* p){
-    auto s=readState(p);double now=m_outerUpdates/4.;
-    if(m_observationTime>=0&&now>m_observationTime){
-        if(s.form==Form::Robot&&!s.grounded&&s.held&&s.vy*(s.inverted?-1:1)>0)m_robotTime+=now-m_observationTime;
-        else if(s.grounded)m_robotTime=0;else if(!s.held)m_robotTime=16;
-    }
-    m_observationTime=now;s.robotTime=m_robotTime;
-    m_calibration.observe({s,now,m_inputEdges,p->m_isDashing||p->m_touchedPad||p->m_touchedRing||p->m_touchedGravityPortal||p->m_isOnSlope});
-    m_observation=s;
+    auto observe=[&](PlayerObject* player,Calibration& calibration,FormState& observation,double& robot,double& previous){
+        auto state=readState(player);double now=m_outerUpdates/4.;
+        if(previous>=0&&now>previous){if(state.form==Form::Robot&&!state.grounded&&state.held&&state.vy*(state.inverted?-1:1)>0)robot+=now-previous;
+            else if(state.grounded)robot=0;else if(!state.held)robot=16;}
+        previous=now;state.robotTime=robot;
+        calibration.observe({state,now,m_inputEdges,player->m_isDashing||player->m_touchedRing||player->m_touchedGravityPortal||player->m_isOnSlope});
+        observation=state;
+    };
+    observe(p,m_calibration,m_observation,m_robotTime,m_observationTime);
+    if(dualEnabled()&&m_layer->m_player2)observe(m_layer->m_player2,m_secondCalibration,m_secondObservation,m_robotTime2,m_observationTime2);
+    else {m_secondCalibration.resetSampling();m_observationTime2=-1;m_robotTime2=0;}
 }
-void Runtime::collectInteractions(double minX,double maxX,double minY,double maxY){
+void Runtime::collectInteractions(PlayerObject* player,double minX,double maxX,double minY,double maxY){
     m_interactions.clear();bool complex=false;
     for(auto const& retained:m_interactionObjects){
         auto object=retained.data();
-        if(object->m_isDisabled||object->m_isGroupDisabled||object->m_isNoTouch||object->m_isActivated)continue;
+        if(object->m_isDisabled||object->m_isGroupDisabled||object->m_isNoTouch||object->hasBeenActivatedByPlayer(player))continue;
         auto type=object->m_objectType;
         if(type==GameObjectType::Solid||type==GameObjectType::Hazard||type==GameObjectType::Decoration||type==GameObjectType::AnimatedHazard)continue;
         auto r=object->getObjectRect();
         if(r.getMaxX()<minX||r.getMinX()>maxX||r.getMaxY()<minY||r.getMinY()>maxY)continue;
-        if(m_layer->m_player1->m_touchedRings.count(object->m_uniqueID))continue;
+        if(player->m_ringRelatedSet.count(object->m_uniqueID))continue;
         Interaction i;i.area={r.getMinX(),r.getMaxX(),r.getMinY(),r.getMaxY()};
         i.area.id=static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(object));m_motion.update(i.area,m_outerUpdates/4.);
         if(auto effect=typeinfo_cast<EffectGameObject*>(object))i.reverse=effect->m_isReverse;
@@ -166,6 +170,7 @@ void Runtime::collectInteractions(double minX,double maxX,double minY,double max
                 break;
             case GameObjectType::InverseGravityPortal:case GameObjectType::NormalGravityPortal:
                 i.kind=InteractionKind::GravityPortal;i.inverted=type==GameObjectType::InverseGravityPortal;break;
+            case GameObjectType::DualPortal:case GameObjectType::SoloPortal:i.kind=InteractionKind::NativeBoundary;break;
             case GameObjectType::GravityTogglePortal:i.kind=InteractionKind::GravityPortal;i.value=1;break;
             case GameObjectType::CubePortal:case GameObjectType::ShipPortal:case GameObjectType::BallPortal:
             case GameObjectType::UfoPortal:case GameObjectType::WavePortal:case GameObjectType::RobotPortal:
@@ -189,40 +194,59 @@ void Runtime::collectInteractions(double minX,double maxX,double minY,double max
         if(!include)continue;
         if(i.kind==InteractionKind::YellowPad||i.kind==InteractionKind::PinkPad||i.kind==InteractionKind::RedPad){
 #ifdef GEODE_IS_WINDOWS
-            i.value=16*m_layer->getBumpMod(m_layer->m_player1,static_cast<int>(type));
+            i.value=16*m_layer->getBumpMod(player,static_cast<int>(type));
 #else
-            auto f=m_observation.form;double mod=1;
+            auto state=readState(player);auto f=state.form;double mod=1;
             if(i.kind==InteractionKind::PinkPad)mod=f==Form::Ship?.35:f==Form::Ufo?.4:(f==Form::Ball||f==Form::Spider)?.7:.65;
-            if(i.kind==InteractionKind::RedPad)mod=f==Form::Ship?(m_observation.scale<.9?.95:.63):f==Form::Ufo?(m_observation.scale<.9?.98:.6):1.25;
+            if(i.kind==InteractionKind::RedPad)mod=f==Form::Ship?(state.scale<.9?.95:.63):f==Form::Ufo?(state.scale<.9?.98:.6):1.25;
             i.value=mod*16;
 #endif
         }
         m_interactions.push_back(i);
     }
-    std::stable_sort(m_interactions.begin(),m_interactions.end(),[&](auto const&a,auto const&b){return std::abs((a.area.left+a.area.right)/2-m_observation.x)<std::abs((b.area.left+b.area.right)/2-m_observation.x);});
+    std::stable_sort(m_interactions.begin(),m_interactions.end(),[&](auto const&a,auto const&b){return std::abs((a.area.left+a.area.right)/2-player->getPositionX())<std::abs((b.area.left+b.area.right)/2-player->getPositionX());});
     if(m_interactions.size()>48)m_interactions.resize(48);
     m_guidanceNote=complex?"Dash/custom/телепорт: ограниченный прогноз":"Прогноз приближённый";
 }
 void Runtime::guideFlight(PlayerObject* player){
-    if(player->m_isDashing){m_guidanceClock.reset();m_guidanceNote="Native dash: сохраняю текущий ввод";m_forecast={};return;}
-    if(m_tick<m_flightFrom){m_forecast={};return;}
+    if(player->m_isDashing||(dualEnabled()&&m_layer->m_player2->m_isDashing)){m_inputCommitment.reset();m_guidanceClock.reset();m_guidanceNote="Dash: ограниченный прогноз, текущий ввод сохранён";m_forecast={};m_secondForecast={};return;}
+    if(m_tick<m_flightFrom){m_inputCommitment.reset();m_forecast={};m_secondForecast={};return;}
     auto count=m_layer->m_objects?m_layer->m_objects->count():0;
     if(count!=m_sceneObjectCount)rebuildSceneCache();
     std::uint64_t events=player->m_touchedRings.size()*16ULL+player->m_touchedPad*1ULL+
-        player->m_touchedRing*2ULL+player->m_touchedGravityPortal*4ULL+player->m_isOnSlope*8ULL;
-    if(m_smoothSearch&&!m_guidanceClock.needsPlan(m_outerUpdates,m_observation,events,m_inputEdges)){
+        player->m_touchedRing*2ULL+player->m_touchedGravityPortal*4ULL+player->m_isOnSlope*8ULL+(dualEnabled()?(1ULL<<60):0);
+    std::uint64_t contact=player->m_ringRelatedSet.size()*256ULL+player->m_touchedRing*2ULL+player->m_touchedGravityPortal*4ULL+player->m_isOnSlope*8ULL;
+    if(dualEnabled())contact^=(m_layer->m_player2->m_ringRelatedSet.size()*256ULL+m_layer->m_player2->m_touchedRing*2ULL+m_layer->m_player2->m_touchedGravityPortal*4ULL)<<24;
+    if(m_inputCommitment.sample(m_outerUpdates/4.,m_observation,contact,m_searchDesired,dualEnabled()?&m_secondObservation:nullptr)){m_cachedDesired=m_searchDesired;return;}
+    bool firstNeeds=m_guidanceClock.needsPlan(m_outerUpdates,m_observation,events,m_inputEdges),secondNeeds=false;
+    if(dualEnabled())secondNeeds=m_secondGuidanceClock.needsPlan(m_outerUpdates,m_secondObservation,
+        m_layer->m_player2->m_ringRelatedSet.size()*16ULL+m_layer->m_player2->m_touchedRing,m_inputEdges);
+    if(m_smoothSearch&&!firstNeeds&&!secondNeeds){
         m_searchDesired=m_cachedDesired;return;
     }
     m_guidedFlight=true;
     auto s=m_calibration.adjusted(m_observation);
     double reach=std::abs(s.vx)*76+s.halfWidth;
     double minX=s.x+std::min(0.,s.vx<0?-reach:reach)-s.halfWidth,maxX=s.x+std::max(0.,s.vx<0?-reach:reach)+s.halfWidth;
-    collectObstacles(minX,maxX,std::min(s.floor,s.y-500),std::min(s.ceiling,s.y+700));
-    collectInteractions(minX,maxX,s.y-450,s.y+450);
+    auto second=dualEnabled()?m_secondCalibration.adjusted(m_secondObservation):s;
+    if(dualEnabled()){double r=std::abs(second.vx)*76+second.halfWidth;minX=std::min(minX,second.x-r);maxX=std::max(maxX,second.x+r);}
+    collectObstacles(minX,maxX,std::min({s.floor,s.y-500,second.y-500}),std::max(std::min(s.ceiling,s.y+700),std::min(second.ceiling,second.y+700)));
+    collectInteractions(player,minX,maxX,s.y-450,s.y+450);
+    m_secondForecast={};
+    if(dualEnabled()){
+        auto firstInteractions=m_interactions;
+        collectInteractions(m_layer->m_player2,minX,maxX,second.y-450,second.y+450);m_secondInteractions=std::move(m_interactions);m_interactions=std::move(firstInteractions);
+        auto decision=chooseDualInput(s,second,m_flightObstacles,m_interactions,m_secondInteractions,&m_failures,m_showPreview);
+        m_inputCommitment.begin(decision.plan,m_outerUpdates/4.,m_observation,contact,&m_secondObservation);
+        m_searchDesired=decision.down;if(m_showPreview){m_forecast=std::move(decision.first);m_secondForecast=std::move(decision.second);}
+        m_guidanceNote="Dual: совместный прогноз двух игроков";m_cachedDesired=m_searchDesired;return;
+    }
     auto policy=m_search?m_search->policy():0;
     bool interactive=std::any_of(m_interactions.begin(),m_interactions.end(),[&](auto const&i){return std::abs((i.area.left+i.area.right)/2-s.x)<std::abs(s.vx)*42+s.halfWidth;});
-    if(interactive||(s.form!=Form::Cube&&s.form!=Form::Ship&&s.form!=Form::Wave)){
+    bool ramps=std::any_of(m_flightObstacles.begin(),m_flightObstacles.end(),[](auto const&o){return o.ramp;});
+    if(interactive||ramps||(s.form!=Form::Cube&&s.form!=Form::Ship&&s.form!=Form::Wave)){
         auto decision=chooseFormInput(s,m_flightObstacles,m_interactions,&m_failures,(static_cast<int>(policy%7)-3)*.07,m_showPreview);
+        m_inputCommitment.begin(decision.plan,m_outerUpdates/4.,m_observation,contact);
         m_searchDesired=decision.down;if(m_showPreview)m_forecast=std::move(decision.forecast);
     }else if(s.form==Form::Cube){
         GroundObservation g{s.x,s.y,s.vy,s.vx,s.halfWidth,s.halfHeight,player->m_isUpsideDown?1e6:m_spawnFloor,
@@ -247,8 +271,8 @@ void Runtime::guideFlight(PlayerObject* player){
     }
     m_cachedDesired=m_searchDesired;
 }
-void Runtime::rememberFailure(GameObject* object){
-    auto s=readState(m_layer->m_player1);m_observation=s;
+void Runtime::rememberFailure(GameObject* object,PlayerObject* deadPlayer){
+    auto s=readState(deadPlayer?deadPlayer:m_layer->m_player1);m_observation=s;
     FailureRecord f;f.form=s.form;f.x=s.x;f.y=s.y;f.vy=s.vy;f.held=m_held;f.inverted=s.inverted;f.mini=s.scale<.9;
     f.object=object?static_cast<std::uint64_t>(object->m_objectID):0;
     if(s.form==Form::Cube||s.form==Form::Robot)f.kind=s.grounded||s.vy*(s.inverted?-1:1)>=0?FailureKind::LatePress:FailureKind::EarlyPress;
@@ -265,7 +289,7 @@ void Runtime::takeControl(){
 void Runtime::returnToBot(){
     if(m_mode!=Mode::Assisting){m_status="Сейчас управление у бота";return;}
     m_plan=prefix(m_trial.actions,m_tick);m_cursor=m_plan.size();m_flightFrom=m_tick;
-    m_guidanceClock.reset();
+    m_guidanceClock.reset();m_inputCommitment.reset();
     m_searchDesired=m_held;m_mode=Mode::Searching;m_pendingHuman=false;m_autosaveDirty=true;m_autosaveUrgent=true;
     m_status="Участок помощи записан. Бот продолжает";
 }

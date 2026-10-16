@@ -57,17 +57,25 @@ void validate(Macro const& m) {
             std::isfinite(s.dt) && std::isfinite(s.speed) && std::isfinite(s.size) &&
             s.dt > 0 && s.dt <= 100 && std::abs(s.x) < 1e9 && std::abs(s.y) < 1e9,
             "Invalid trace value");
+        require(static_cast<bool>(s.flags&(1u<<12))==s.second.has_value(),"Missing/unexpected second player trace");
+        if(s.second){auto const&p=*s.second;require(std::isfinite(p.x)&&std::isfinite(p.y)&&std::isfinite(p.vy)&&
+            std::isfinite(p.speed)&&std::isfinite(p.size)&&std::abs(p.x)<1e9&&std::abs(p.y)<1e9,"Invalid second player trace");}
         previous = s.tick;
         first = false;
     }
-    require(m.trace.size() == (m.ticks - 1) / 16 + 1, "Trace must cover every 16th tick");
-    for (std::size_t i = 0; i < m.trace.size(); ++i)
-        require(m.trace[i].tick == i * 16, "Missing trace sample");
+    Tick required=0;bool wasDual=false;
+    for(auto const&s:m.trace){
+        require(s.tick<=required,"Missing regular trace sample");
+        if(s.tick==required)required+=16;
+        else require(s.second.has_value()!=wasDual,"Unexpected intermediate trace sample");
+        wasDual=s.second.has_value();
+    }
+    require(required>=m.ticks,"Trace must cover every 16th tick");
 }
 
 json toJson(Macro const& m) {
     validate(m);
-    json j = {{"format", "routefinder"}, {"schema", 1}, {"environment", m.environment},
+    json j = {{"format", "routefinder"}, {"schema", 2}, {"environment", m.environment},
         {"ticks", m.ticks}, {"outer_updates", m.outerUpdates}, {"best_percent", m.bestPercent}, {"completed", m.completed},
         {"verified_from_start", m.verified}, {"attempts", m.attempts},
         {"search_seed", m.searchSeed}, {"search_max_cps", m.searchMaxCps}, {"stop_reason", m.stopReason},
@@ -76,14 +84,17 @@ json toJson(Macro const& m) {
     for (auto const& a : m.actions)
         j["actions"].push_back({{"tick", a.tick}, {"down", a.down},
             {"button", a.button}, {"player", a.player}});
-    for (auto const& s : m.trace)
+    for (auto const& s : m.trace) {
         j["trace"].push_back({{"tick", s.tick}, {"x", s.x}, {"y", s.y}, {"vy", s.vy},
             {"speed", s.speed}, {"size", s.size}, {"dt", s.dt}, {"flags", s.flags}});
+        auto& entry=j["trace"].back();entry["player2"]=nullptr;
+        if(s.second){auto const&p=*s.second;entry["player2"]={{"x",p.x},{"y",p.y},{"vy",p.vy},{"speed",p.speed},{"size",p.size},{"flags",p.flags}};}
+    }
     return j;
 }
 
 Macro fromJson(json const& j) {
-    require(j.at("format") == "routefinder" && j.at("schema") == 1, "Unsupported format/schema");
+    require(j.at("format") == "routefinder" && (j.at("schema") == 1 || j.at("schema") == 2), "Unsupported format/schema");
     Macro m;
     m.environment = j.at("environment");
     m.ticks = uintField(j.at("ticks"));
@@ -108,7 +119,7 @@ Macro fromJson(json const& j) {
         m.timings.push_back({number(t.at(0)), t.at(1).get<bool>(), t.at(2).get<bool>()});
     }
     require(actions.is_array() && actions.size() <= MaxTicks, "Invalid actions array");
-    require(trace.is_array() && trace.size() <= MaxTicks / 16 + 1, "Invalid trace array");
+    require(trace.is_array() && trace.size() <= MaxTicks, "Invalid trace array");
     for (auto const& a : actions) {
         require(uintField(a.at("button")) == 1 && uintField(a.at("player")) == 1,
             "Unsupported button/player");
@@ -120,6 +131,12 @@ Macro fromJson(json const& j) {
         m.trace.push_back({uintField(s.at("tick")), number(s.at("x")), number(s.at("y")),
             number(s.at("vy")), number(s.at("speed")), number(s.at("size")),
             number(s.at("dt")), static_cast<std::uint32_t>(flags)});
+        if(j.at("schema")==2){
+            auto const&p=s.at("player2");if(!p.is_null()){
+                auto pf=uintField(p.at("flags"));require(pf<=UINT32_MAX,"Invalid player2 flags");
+                m.trace.back().second=PlayerSample{number(p.at("x")),number(p.at("y")),number(p.at("vy")),number(p.at("speed")),number(p.at("size")),static_cast<std::uint32_t>(pf)};
+            }
+        }
     }
     validate(m);
     return m;
@@ -172,6 +189,11 @@ json loadJsonFile(std::filesystem::path const& path) {
 }
 
 bool sameSample(Sample const& a, Sample const& b) {
+    if(a.second.has_value()!=b.second.has_value())return false;
+    if(a.second){auto const&x=*a.second;auto const&y=*b.second;
+        if(!(x.flags==y.flags&&std::abs(x.x-y.x)<=1e-4&&std::abs(x.y-y.y)<=1e-4&&std::abs(x.vy-y.vy)<=1e-7&&
+            std::abs(x.speed-y.speed)<=1e-7&&std::abs(x.size-y.size)<=1e-7))return false;
+    }
     return a.tick == b.tick && a.flags == b.flags &&
         std::abs(a.x - b.x) <= 1e-4 && std::abs(a.y - b.y) <= 1e-4 &&
         std::abs(a.vy - b.vy) <= 1e-7 && std::abs(a.speed - b.speed) <= 1e-7 &&
@@ -326,8 +348,8 @@ std::vector<Action> Search::next(Tick limit) {
             start = death > window ? death - window : 0;
             result = prefix(parent.actions, start);
             bool held = heldBefore(result, start);
-            static constexpr Tick intervals[]{1, 4, 8, 15, 24, 32, 64, 120, 240};
-            for (Tick t = start; t < std::min(limit, death + 120); t += intervals[m_rng() % 9])
+            static constexpr Tick intervals[]{30, 60, 90, 120, 180, 240, 360, 480, 720};
+            for (Tick t = start, edits=0; t < std::min(limit, death + 120) && edits<6; t += intervals[m_rng() % 9],++edits)
                 appendAction(result, t, held = !held);
             m_guidanceFrom = result.empty() ? start : result.back().tick + 1;
             m_phase = SearchPhase::Explore;

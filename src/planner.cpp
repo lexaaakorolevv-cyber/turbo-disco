@@ -21,10 +21,11 @@ bool isOrb(InteractionKind k){return k<=InteractionKind::BlackOrb||k==Interactio
 void activate(FormState&s,Interaction const&o,std::span<Obstacle const>objects,double time){
     double oldSign=sign(s),mini=s.scale<.9?.8:1;
     switch(o.kind){
-        case InteractionKind::ModePortal:s.form=o.target;s.grounded=false;s.robotTime=0;break;
+        case InteractionKind::NativeBoundary:s.boundary=true;break;
+        case InteractionKind::ModePortal:s.form=o.target;s.grounded=false;s.robotTime=0;s.boundary=true;break;
         case InteractionKind::GravityPortal:s.inverted=o.value==1?!s.inverted:o.inverted;s.grounded=false;break;
         case InteractionKind::SizePortal:{double target=o.value<.9?.6:1;double ratio=target/s.scale;s.halfWidth*=ratio;s.halfHeight*=ratio;s.scale=target;break;}
-        case InteractionKind::SpeedPortal:s.vx=std::copysign(o.value,s.vx);break;
+        case InteractionKind::SpeedPortal:s.vx=std::copysign(o.value,s.vx);s.boundary=true;break;
         case InteractionKind::SpiderOrb:case InteractionKind::SpiderPad:
             s.inverted=o.inverted; snapSpider(s,objects,time);break;
         case InteractionKind::YellowPad:case InteractionKind::PinkPad:case InteractionKind::RedPad:
@@ -50,16 +51,17 @@ bool advanceForm(FormState&s,bool down,double dt,std::span<Obstacle const>object
     std::span<Interaction const>interactions,std::uint64_t&used,double time){
     if(!std::isfinite(dt)||dt<=0||dt>2)return false;
     bool rising=down&&!s.held;
+    if(!down||rising)s.ringArmed=true;
     if(rising&&s.pressRemaining>1e-8)return false;
     s.pressRemaining=std::max(0.,(rising?s.pressInterval:s.pressRemaining)-dt);
     double oldX=s.x,oldY=s.y,sgn=sign(s),g=s.gravity*s.gravityMod,mini=s.scale<.9?.8:1;
-    bool teleported=false;
+    bool teleported=false,wasGrounded=s.grounded;
     if(s.form==Form::Ball&&s.grounded&&rising){s.inverted=!s.inverted;s.vy=sgn*s.jump*mini*.6;s.grounded=false;}
     else if(s.form==Form::Spider&&s.grounded&&rising){if(!snapSpider(s,objects,time))return false;teleported=true;}
     else if((s.form==Form::Cube||s.form==Form::Robot)&&s.grounded&&down){s.vy=sgn*s.jump*mini*(s.form==Form::Robot?.5:1);s.grounded=false;s.robotTime=0;}
     else if(s.form==Form::Ufo&&rising){double v=(s.scale<.9?8:7)*(s.scale<.9?.85:1);if(s.vy*sgn<v)s.vy=sgn*v;s.grounded=false;}
     else if(s.form==Form::Swing&&rising){s.inverted=!s.inverted;s.vy*=.8;}
-    sgn=sign(s);
+    sgn=sign(s);double startVy=s.vy;
     if(s.form==Form::Wave)s.vy=std::abs(s.vx)*sgn*(down?1:-1)*(s.scale<.9?2:1)*s.waveSlope;
     else if(s.form==Form::Ship){bool falling=s.vy*sgn<0;int branch=(down?0:2)+(falling?1:0);double a=down?(falling?.4791:.3833):-(falling?.3066:.4599);
         s.vy+=sgn*a*s.gravityMod/(s.scale<.9?.85:1)*s.acceleration[branch]*dt;
@@ -71,41 +73,80 @@ bool advanceForm(FormState&s,bool down,double dt,std::span<Obstacle const>object
         if(s.form==Form::Robot){s.robotTime+=dt;if(!down)s.robotTime=16;}
         s.vy=sgn*std::max(s.vy*sgn,-15.);
     }
-    s.x+=s.vx*dt;s.y+=s.vy*dt;s.held=down;
+    s.x+=s.vx*dt;
+    // Integrate distant steps as an aggregate of the near .25-unit steps.
+    // A single long semi-implicit step otherwise invents early landings.
+    s.y+=s.form==Form::Wave?s.vy*dt:(startVy+s.vy)*dt/2+(s.vy-startVy)*std::min(dt,.25)/2;
+    s.held=down;
     for(std::size_t i=0;i<interactions.size()&&i<64;++i){auto mask=std::uint64_t(1)<<i;auto const&o=interactions[i];
         if((used&mask)||!forecastOverlap(oldX,oldY,s.x,s.y,s.halfWidth,s.halfHeight,o.area,time,time+dt))continue;
-        if(isOrb(o.kind)&&!down)continue;
+        if(isOrb(o.kind)&&(!down||!s.ringArmed))continue;
         activate(s,o,objects,time+dt);used|=mask;
+        if(isOrb(o.kind))s.ringArmed=false;
         if(o.kind==InteractionKind::SpiderOrb||o.kind==InteractionKind::SpiderPad)teleported=true;
     }
     if(groundForm(s.form)){
         bool landed=false;double target=s.inverted?-std::numeric_limits<double>::infinity():std::numeric_limits<double>::infinity();
-        if(!s.inverted&&oldY-s.halfHeight>=s.floor-.1&&s.y-s.halfHeight<=s.floor){target=s.floor+s.halfHeight;landed=true;}
-        if(s.inverted&&oldY+s.halfHeight<=s.ceiling+.1&&s.y+s.halfHeight>=s.ceiling){target=s.ceiling-s.halfHeight;landed=true;}
+        if(!s.inverted&&s.vy<=0&&oldY-s.halfHeight>=s.floor-.1&&s.y-s.halfHeight<=s.floor){target=s.floor+s.halfHeight;landed=true;}
+        if(s.inverted&&s.vy>=0&&oldY+s.halfHeight<=s.ceiling+.1&&s.y+s.halfHeight>=s.ceiling){target=s.ceiling-s.halfHeight;landed=true;}
         for(auto const&base:objects){if(!base.solid)continue;auto o=obstacleAt(base,time+dt);
             if(s.x+s.halfWidth<=o.left||s.x-s.halfWidth>=o.right)continue;
-            if(!s.inverted&&s.vy<=0&&oldY-s.halfHeight>=o.top-.1&&s.y-s.halfHeight<=o.top){target=landed?std::max(target,o.top+s.halfHeight):o.top+s.halfHeight;landed=true;}
-            if(s.inverted&&s.vy>=0&&oldY+s.halfHeight<=o.bottom+.1&&s.y+s.halfHeight>=o.bottom){target=landed?std::min(target,o.bottom-s.halfHeight):o.bottom-s.halfHeight;landed=true;}
+            double top=o.top,bottom=o.bottom;
+            if(o.ramp){auto span=verticalSpan(o,s.x,s.halfWidth);if(span){bottom=span->first;top=span->second;}}
+            bool followsRamp=false;
+            if(o.ramp&&wasGrounded){auto old=obstacleAt(base,time);auto span=verticalSpan(old,oldX,s.halfWidth);
+                followsRamp=span&&std::abs((s.inverted?oldY+s.halfHeight:oldY-s.halfHeight)-(s.inverted?span->first:span->second))<2;}
+            if(!s.inverted&&s.vy<=0&&(oldY-s.halfHeight>=top-.1||followsRamp)&&(s.y-s.halfHeight<=top||followsRamp)){target=landed?std::max(target,top+s.halfHeight):top+s.halfHeight;landed=true;}
+            if(s.inverted&&s.vy>=0&&(oldY+s.halfHeight<=bottom+.1||followsRamp)&&(s.y+s.halfHeight>=bottom||followsRamp)){target=landed?std::min(target,bottom-s.halfHeight):bottom-s.halfHeight;landed=true;}
         }
         if(teleported){landed=true;target=s.y;}
         if(landed){s.y=target;s.vy=0;s.grounded=true;}else s.grounded=false;
-    }else if(s.y-s.halfHeight<s.floor||s.y+s.halfHeight>s.ceiling)return false;
+    }else if(!s.boundary&&(s.y-s.halfHeight<s.floor||s.y+s.halfHeight>s.ceiling))return false;
     for(auto const&o:objects){
         // A spider traverses space instantaneously; only its destination is a
         // candidate collision. The real native spider jump is never simulated.
         double x1=teleported?s.x:oldX,y1=teleported?s.y:oldY;
-        if(forecastOverlap(x1,y1,s.x,s.y,s.halfWidth-.05,s.halfHeight-.05,o,time,time+dt))return false;
+        double margin=o.solid?-.05:3.0;
+        if(forecastOverlap(x1,y1,s.x,s.y,s.halfWidth+margin,s.halfHeight+margin,o,time,time+dt))return false;
     }
     return std::isfinite(s.x)&&std::isfinite(s.y)&&std::isfinite(s.vy);
+}
+double approachCost(FormState const&s,std::span<Obstacle const> objects,double time,double dt){
+    if(s.form!=Form::Cube&&s.form!=Form::Robot&&s.form!=Form::Ball&&s.form!=Form::Spider)return 0;
+    double nearest=96;
+    for(auto const&base:objects){if(base.ramp)continue;auto o=obstacleAt(base,time);
+        double gap=s.vx>=0?o.left-s.x-s.halfWidth:s.x-s.halfWidth-o.right;
+        if(gap<0||gap>=nearest||s.y+s.halfHeight<=o.bottom||s.y-s.halfHeight>=o.top)continue;
+        nearest=gap;
+    }
+    double proximity=1-nearest/96;return .5*proximity*proximity*dt;
+}
+double formCost(FormState const& s,FormState const& before,bool down,double dt,double centre,double bias){
+    bool groundedMode=s.form==Form::Cube||s.form==Form::Robot||s.form==Form::Ball||s.form==Form::Spider;
+    // Ground modes have no reason to seek the middle of a flight corridor.
+    // Safe walking wins over an unnecessary jump; survival still comes first.
+    double cost=(down!=before.held?.25:0)+(down&&!before.held?(groundedMode?1.2:.25):0);
+    if(!groundedMode){double error=std::max(0.,std::abs(s.y-centre-bias*25)-10);cost+=error*error*.0005*dt;}
+    else {
+        if(down)cost+=.03*dt;
+        if(before.grounded&&!s.grounded&&(s.form==Form::Cube||s.form==Form::Robot)&&s.vy*(s.inverted?-1:1)>0)cost+=.6;
+    }
+    return cost;
+}
+bool equivalentFormStates(FormState const&a,FormState const&b){
+    return a.form==b.form&&a.inverted==b.inverted&&a.held==b.held&&a.grounded==b.grounded&&
+        a.ringArmed==b.ringArmed&&a.boundary==b.boundary&&std::abs(a.x-b.x)<1.5&&
+        std::abs(a.y-b.y)<2&&std::abs(a.vy-b.vy)<.5&&std::abs(a.pressRemaining-b.pressRemaining)<.5&&
+        (a.form!=Form::Robot||std::abs(a.robotTime-b.robotTime)<.5);
 }
 FormDecision chooseFormInput(FormState const&initial,std::span<Obstacle const>objects,
     std::span<Interaction const>interactions,FailureMemory const*failures,double bias,bool includeForecast){
     if(!std::isfinite(initial.x)||!std::isfinite(initial.y)||!std::isfinite(initial.vy)||!std::isfinite(initial.vx)||
         !std::isfinite(initial.floor)||!std::isfinite(initial.ceiling)||!std::isfinite(initial.gravity)||!std::isfinite(initial.scale)||initial.gravity<=0||initial.scale<=0||static_cast<int>(initial.form)<0||static_cast<int>(initial.form)>7)return {};
-    struct Node{FormState s;std::uint64_t used=0;double cost=0;bool first=false;int trace=0;};
+    struct Node{FormState s;std::uint64_t used=0;double cost=0;bool first=false;int trace=0;unsigned short inputs=0;};
     struct Trace{Point p;int parent;};
     std::vector<Trace> tree; if(includeForecast){tree.reserve(7169);tree.push_back({{initial.x,initial.y},-1});}
-    std::vector<Obstacle> nearby;nearby.reserve(objects.size());
+    std::vector<Obstacle> nearby,danger;nearby.reserve(objects.size());danger.reserve(objects.size());
     std::vector<Node> beam{{initial}},next;beam.reserve(64);next.reserve(128);
     FormDecision result;int bestTrace=0;double time=0;
     double centre=std::isfinite(initial.ceiling)&&initial.ceiling-initial.floor<1500?(initial.floor+initial.ceiling)/2:initial.y;
@@ -113,20 +154,22 @@ FormDecision chooseFormInput(FormState const&initial,std::span<Obstacle const>ob
         double left=beam.front().s.x,right=left,radius=0;
         for(auto const& n:beam){left=std::min(left,n.s.x-std::abs(n.s.vx)*dt);right=std::max(right,n.s.x+std::abs(n.s.vx)*dt);radius=std::max(radius,n.s.halfWidth*1.7);}
         horizontalCandidates(objects,left,right,radius,time,time+dt,nearby);
+        horizontalCandidates(objects,left-96,right+96,radius,time,time+dt,danger);
         for(auto const&n:beam)for(bool down:{false,true}){
-            auto child=n;if(depth==0)child.first=down;
+            auto child=n;if(depth==0)child.first=down;if(depth<12&&down)child.inputs|=static_cast<unsigned short>(1u<<depth);
             if(!advanceForm(child.s,down,dt,nearby,interactions,child.used,time))continue;
-            double error=std::max(0.,std::abs(child.s.y-centre-bias*25)-8);
-            child.cost+=error*error*.0005*dt+(child.s.held!=n.s.held?.35:0);
+            child.cost+=formCost(child.s,n.s,down,dt,centre,bias)+approachCost(child.s,danger,time+dt,dt);
             if(failures)child.cost+=failures->penalty(child.s,down)*dt;
             if(includeForecast){tree.push_back({{child.s.x,child.s.y},n.trace});child.trace=static_cast<int>(tree.size()-1);}
             next.push_back(child);
         }
         if(next.empty()){if(includeForecast)result.forecast.collision=Point{beam.front().s.x+beam.front().s.vx*dt,beam.front().s.y+beam.front().s.vy*dt};break;}
         std::stable_sort(next.begin(),next.end(),[](auto const&a,auto const&b){return a.cost<b.cost;});beam.clear();
-        for(auto const&n:next){bool duplicate=std::any_of(beam.begin(),beam.end(),[&](auto const&b){return n.first==b.first&&n.used==b.used&&n.s.form==b.s.form&&n.s.inverted==b.s.inverted&&n.s.held==b.s.held&&n.s.grounded==b.s.grounded&&std::abs(n.s.y-b.s.y)<2&&std::abs(n.s.vy-b.s.vy)<.5&&std::abs(n.s.pressRemaining-b.s.pressRemaining)<.5;});
-            if(!duplicate)beam.push_back(n);if(beam.size()==64)break;}
-        time+=dt;result.down=beam.front().first;result.survival=time;bestTrace=beam.front().trace;
+        int counts[2]{};bool both=std::any_of(next.begin(),next.end(),[](auto const&n){return n.first;})&&std::any_of(next.begin(),next.end(),[](auto const&n){return !n.first;});
+        for(auto const&n:next){if(both&&counts[n.first]>=32)continue;bool duplicate=std::any_of(beam.begin(),beam.end(),[&](auto const&b){return n.first==b.first&&n.used==b.used&&equivalentFormStates(n.s,b.s);});
+            if(!duplicate){beam.push_back(n);++counts[n.first];}if(beam.size()==64)break;}
+        time+=dt;result.down=beam.front().first;result.survival=time;bestTrace=beam.front().trace;result.plan={beam.front().inputs,static_cast<unsigned>(std::min(depth+1,12)),std::min(time,3.)};
+        if(beam.front().s.boundary)break;
     }
     if(includeForecast)for(int i=bestTrace;i>=0;i=tree[i].parent)result.forecast.path.push_back(tree[i].p);
     std::reverse(result.forecast.path.begin(),result.forecast.path.end());result.forecast.down=result.down;result.forecast.survival=result.survival;return result;
