@@ -83,7 +83,7 @@ class Menu final:public Popup {
   setText(m_pathCaption,r.previewEnabled()?"Траектория: показывать":"Траектория: скрыть");
   setText(m_smoothCaption,r.smoothSearch()?"Нагрузка: ниже":"Нагрузка: обычная");
   setText(m_helpCaption,r.assisting()?"Вернуть управление боту":"Ручная помощь");
-  setText(m_info,r.status()+(r.dualEnabled()?"\nDual: общая кнопка для обоих игроков":""));
+  setText(m_info,r.status()+(r.twoPlayerEnabled()?"\n2-player: отдельные кнопки P1 и P2, 16 CPS на игрока":r.dualEnabled()?"\nDual: общая кнопка для обоих игроков":""));
   m_info->setScale(std::min(1.f,36.f/std::max(1.f,m_info->getContentSize().height)));
  }
  void pages(int page){m_currentPage=page;
@@ -113,7 +113,7 @@ class Hud final:public CCNode {
   if(resize){m_viewport=size;setContentSize(size);m_menu->setContentSize(size);m_open->setPosition({size.width-166,size.height-58});m_stop->setPosition({size.width-112,size.height-58});m_help->setPosition({size.width-58,size.height-58});m_plate->setPosition({size.width-212,size.height-98});float w=190;m_plate->setContentSize({w,54});
    auto bg=static_cast<CCDrawNode*>(m_plate->getChildren()->objectAtIndex(0));bg->clear();roundRect(bg,0,0,w,54,7,{1,1,1,.94f});m_textTime=1;}
   m_textTime+=dt;m_pathTime+=dt;auto mode=r.modeName();
-  if(m_textTime>=.1f||mode!=m_lastMode){m_textTime=0;m_lastMode=mode;setText(m_status,fmt::format("{}{}\n#{}  ·  {:.1f}%{}",mode,r.dualEnabled()?"  ·  dual":"",r.attempts(),r.bestPercent(),r.searching()?fmt::format("  ·  {}/16",r.cps()):""));m_status->setScale(std::min(1.f,172.f/std::max(1.f,m_status->getContentSize().width)));}
+  if(m_textTime>=.1f||mode!=m_lastMode){m_textTime=0;m_lastMode=mode;setText(m_status,fmt::format("{}{}\n#{}  ·  {:.1f}%{}",mode,r.twoPlayerEnabled()?"  ·  2P":r.dualEnabled()?"  ·  dual":"",r.attempts(),r.bestPercent(),r.searching()?fmt::format("  ·  {}/16",r.cps()):""));m_status->setScale(std::min(1.f,172.f/std::max(1.f,m_status->getContentSize().width)));}
   bool visible=r.showPreview()&&!r.frozen();auto layer=r.layer();
   if(!visible||!layer||!layer->m_player1||!layer->m_player1->getParent()){if(m_hadPath){m_draw->clear();m_hadPath=false;}return;}
   if(m_pathTime<1.f/30&&!resize)return;m_pathTime=0;m_draw->clear();m_hadPath=true;

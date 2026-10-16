@@ -30,7 +30,7 @@ void Runtime::bind(PlayLayer* layer) {
     m_guidanceNote.clear(); m_lastFailure.clear();
     m_showPreview=Mod::get()->getSettingValue<bool>("show-preview");
     m_smoothSearch=Mod::get()->getSettingValue<bool>("smooth-search");
-    m_status = "Готов. Обычные уровни и dual с общей кнопкой.";
+    m_status = "Готов. Solo, dual и независимый 2-player.";
     log::info("Route Finder {} attached to active level", ModVersion);
 }
 bool Runtime::levelReady() const {
@@ -74,7 +74,7 @@ void Runtime::unbind(PlayLayer* layer) {
 void Runtime::setMenuOpen(bool open) {
     m_menuOpen = open;
     m_accumulator = 0; // Menu time must never accumulate into catch-up ticks.
-    if (open) m_pendingHuman = false;
+    if (open) m_pendingHuman = m_pendingHuman2=false;
 }
 void Runtime::resumeOverlay(PauseLayer* pause, EndLevelLayer* end) {
     // The native result/pause screen must close before a queued run can begin.
@@ -90,7 +90,6 @@ std::string Runtime::unsupported() const {
     if (!levelReady()) return readinessError();
     auto s = m_layer->m_levelSettings;
     if (m_layer->m_isPlatformer || s->m_platformerMode) return "Platformer не поддерживается";
-    if (s->m_twoPlayerMode || m_layer->m_level->m_twoPlayerMode) return "Независимый 2-player пока не поддерживается; dual с общей кнопкой поддерживается";
     if (m_layer->m_isPracticeMode) return "Выйдите из practice mode";
     if (m_layer->m_startPosObject || s->m_startsWithStartPos) return "Start Position не поддерживается";
     if (s->m_dontReset) return "Уровни с Don't Reset не поддерживаются";
@@ -131,7 +130,7 @@ nlohmann::json Runtime::environment() const {
         {"physics", {{"outer_updates_per_second", 240}, {"outer_step_seconds", 1.0 / 240.0},
             {"tick_unit", "positive-dt processCommands call, including native half steps"},
             {"input_boundary", "GJBaseGameLayer::processCommands/pre/v1"},
-            {"input_mode","single-button/native-shared-dual"}, {"dual_trace",true},
+            {"input_mode",twoPlayerEnabled()?"two-player/native-independent":"single-button/native-shared-dual"}, {"two_player",twoPlayerEnabled()}, {"dual_trace",true},
             {"click_between_steps", false}, {"click_on_steps", false},
             {"time_warp", 1.0}, {"start_from_beginning", true}, {"checkpoints", false},
             {"game_seed", GameSeed}, {"trace_stride", 16},
@@ -153,7 +152,7 @@ bool Runtime::prepare() {
     m_outerLimit = 240 * mod->getSettingValue<int64_t>("max-attempt-seconds");
     m_tickLimit = MaxTicks;
     m_seed = mod->getSettingValue<int64_t>("search-seed");
-    m_inputPacer.reset(SearchCps);
+    m_inputPacer.reset(SearchCps);m_inputPacer2.reset(SearchCps);
     m_calibration = {}; m_secondCalibration = {}; m_failures = {}; m_motion.reset(); m_forecast = {};
     m_showPreview = mod->getSettingValue<bool>("show-preview");
     m_smoothSearch = mod->getSettingValue<bool>("smooth-search");
@@ -241,18 +240,16 @@ void Runtime::releaseInput() {
     if (m_layer->m_player1) m_layer->m_player1->releaseAllButtons();
     if (m_layer->m_player2) m_layer->m_player2->releaseAllButtons();
     m_injecting = false;
-    m_pendingHuman = false;
-    m_held = false;
+    m_pendingHuman = m_pendingHuman2=false;
+    m_held = m_held2=false;
 }
-void Runtime::inject(bool down) {
+void Runtime::inject(bool down,int player) {
     m_injecting = true;
-    // In normal single-player mode both physical input sides route to P1.
-    // Use the main side (false), as used by the native queued command path.
-    m_layer->handleButton(down, 1, false);
+    m_layer->handleButton(down,1,nativeButtonSide(player,twoPlayerEnabled(),GameManager::get()->getGameVariable("0010")));
     m_injecting = false;
-    m_held = down;
+    (player==2?m_held2:m_held) = down;
     ++m_inputEdges;
-    appendAction(m_trial.actions, m_tick, down);
+    appendAction(m_trial.actions, m_tick, down,player);
 }
 
 
@@ -287,12 +284,12 @@ void Runtime::beginAttempt() {
     m_cursor = 0;
     m_traceCursor = 0;
     m_guidedFlight = false;
-    m_searchDesired = false;
-    m_inputPacer.reset(m_inputPacer.limit());
+    m_searchDesired = m_searchDesired2=false;
+    m_inputPacer.reset(m_inputPacer.limit());m_inputPacer2.reset(m_inputPacer.limit());
     m_flightObstacles.clear();
     m_motion.reset(); m_calibration.resetSampling();m_secondCalibration.resetSampling(); m_forecast = {};m_secondForecast={};
     m_observationTime = m_observationTime2=-1; m_robotTime=m_robotTime2=0;m_previousDual=false; m_inputEdges = 0;
-    m_guidanceClock.reset();m_secondGuidanceClock.reset();m_inputCommitment.reset();m_cachedDesired=false;rebuildSceneCache();
+    m_guidanceClock.reset();m_secondGuidanceClock.reset();m_inputCommitment.reset();m_secondCommitment.reset();m_cachedDesired=false;rebuildSceneCache();
     m_trialPercent = 0;
     m_accumulator = 0;
     ++m_attempts;
@@ -388,11 +385,11 @@ bool Runtime::beforeTick(float dt, bool halfTick, bool lastTick) {
         stop("Некорректный физический dt"); return false;
     }
     if (dt == 0) return true; // No physics advance, therefore no new input tick.
-    if (m_layer->m_levelSettings->m_twoPlayerMode || m_layer->m_isPracticeMode ||
+    if (twoPlayerEnabled()!=m_environment.at("physics").at("two_player").get<bool>() || GameManager::get()->getGameVariable("0010")!=m_environment.at("physics").at("flip_controls").get<bool>() || m_layer->m_isPracticeMode ||
         m_layer->m_ignoreDamage || m_layer->m_isIgnoreDamageEnabled ||
         std::abs(m_layer->m_gameState.m_timeWarp - 1.f) > 1e-6 ||
         m_layer->m_clickBetweenSteps || m_layer->m_clickOnSteps) {
-        stop("Изменился неподдерживаемый режим: 2-player/practice/noclip/time warp/CBS"); return false;
+        stop("Изменились управление/режим: practice/noclip/time warp/CBS"); return false;
     }
     if (m_target && m_tick >= m_target->ticks) {
         if (m_target->completed) failReplay("Конец записи без levelComplete");
@@ -439,12 +436,13 @@ bool Runtime::beforeTick(float dt, bool halfTick, bool lastTick) {
     m_previousDual=dualEnabled();
     m_trial.timings.push_back({dt, halfTick, lastTick});
     if (m_mode == Mode::Recording || m_mode == Mode::Assisting) {
-        bool desired = m_mode == Mode::Assisting ? m_inputPacer.apply(m_pendingHuman, m_outerUpdates) : m_pendingHuman;
-        if (desired != m_held) inject(desired);
-    } else if (m_cursor < m_plan.size() && m_plan[m_cursor].tick == m_tick) {
-        auto down = m_plan[m_cursor++].down;
-        if (m_mode == Mode::Searching) m_searchDesired = down;
-        else inject(down);
+        bool desired=m_mode==Mode::Assisting?m_inputPacer.apply(m_pendingHuman,m_outerUpdates):m_pendingHuman;
+        if(desired!=m_held)inject(desired);
+        if(twoPlayerEnabled()){bool other=m_mode==Mode::Assisting?m_inputPacer2.apply(m_pendingHuman2,m_outerUpdates):m_pendingHuman2;if(other!=m_held2)inject(other,2);}
+    } else while(m_cursor<m_plan.size()&&m_plan[m_cursor].tick==m_tick){
+        auto const&action=m_plan[m_cursor++];
+        if(m_mode==Mode::Searching)(action.player==2?m_searchDesired2:m_searchDesired)=action.down;
+        else inject(action.down,action.player);
     }
     // Verification and replay consume only saved actions; they must never
     // make a fresh decision from the obstacle forecast.
@@ -452,6 +450,7 @@ bool Runtime::beforeTick(float dt, bool halfTick, bool lastTick) {
         guideFlight(p);
         auto down = m_inputPacer.apply(m_searchDesired, m_outerUpdates);
         if (down != m_held) inject(down);
+        if(twoPlayerEnabled()){auto other=m_inputPacer2.apply(m_searchDesired2,m_outerUpdates);if(other!=m_held2)inject(other,2);}
     }
     ++m_tick; // Count consumed input boundaries, including the eventual death tick.
     m_trialPercent = std::max(m_trialPercent, static_cast<double>(std::clamp(m_layer->getCurrentPercent(), 0.f, 100.f)));
@@ -467,14 +466,14 @@ bool Runtime::advanceOuterUpdate() {
     return true;
 }
 
-bool Runtime::humanInput(bool down, int button, bool /*inputSide*/) {
-    if (m_injecting) return true;
-    if (!active()) return !m_menuOpen;
-    // Single-control dual uses the same native shared button as solo.
-    // Independent two-player controls remain explicitly unsupported.
-    if ((m_mode == Mode::Recording || m_mode == Mode::Assisting) && button == 1 && !m_menuOpen)
-        m_pendingHuman = down;
-    return false; // No physical input can contaminate search or replay queues.
+bool Runtime::humanInput(bool down,int button,bool inputSide){
+    if(m_injecting)return true;
+    if(!active())return !m_menuOpen;
+    if((m_mode==Mode::Recording||m_mode==Mode::Assisting)&&button==1&&!m_menuOpen){
+        int player=logicalPlayer(inputSide,twoPlayerEnabled(),GameManager::get()->getGameVariable("0010"));
+        (player==2?m_pendingHuman2:m_pendingHuman)=down;
+    }
+    return false;
 }
 void Runtime::died(GameObject* object,PlayerObject* deadPlayer) {
     if (!active() || m_restart) return;
@@ -485,6 +484,7 @@ void Runtime::died(GameObject* object,PlayerObject* deadPlayer) {
         m_mode = Mode::Searching;
         auto player = m_layer->m_player1;
         m_search->observe(trial.actions, trial.ticks, trial.bestPercent, (player && (player->m_isShip || player->m_isDart)) || (dualEnabled()&&m_layer->m_player2&&(m_layer->m_player2->m_isShip||m_layer->m_player2->m_isDart)));
+        if(twoPlayerEnabled())m_search->preferPlayer(deadPlayer==m_layer->m_player2?2:1);
         auto timing = m_failures.timingBias(m_observation);
         m_search->preferTiming(timing > 0 ? -1 : timing < 0 ? 1 : 0);
         m_plan = m_search->next(m_tickLimit);

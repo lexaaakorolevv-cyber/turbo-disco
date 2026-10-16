@@ -5,6 +5,10 @@
 
 namespace rf {
 inline constexpr int SearchCps = 16;
+// The pinned 2.2081 binding names the native argument isPlayer1.
+inline bool nativeButtonSide(int player,bool independent,bool flip){return independent?((player==1)!=flip):false;}
+inline int logicalPlayer(bool side,bool independent,bool flip){return independent?((side!=flip)?1:2):1;}
+
 // All timestamps use the fixed outer 240 Hz simulation clock, not render
 // frames or processCommands call count (which includes native half ticks).
 class InputPacer {

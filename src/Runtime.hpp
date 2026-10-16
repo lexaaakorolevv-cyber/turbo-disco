@@ -34,7 +34,7 @@ public:
     void returnToBot();
     void toggleSmooth() {m_smoothSearch=!m_smoothSearch;m_guidanceClock.reset();geode::Mod::get()->setSettingValue<bool>("smooth-search",m_smoothSearch);}
     bool searching() const {return m_mode==Mode::Searching||m_mode==Mode::Assisting;}
-    unsigned cps() const {return m_inputPacer.currentCps();}
+    unsigned cps() const {return std::max(m_inputPacer.currentCps(),twoPlayerEnabled()?m_inputPacer2.currentCps():0);}
     bool smoothSearch() const {return m_smoothSearch;}
     bool previewEnabled() const {return m_showPreview;}
     double bestPercent() const {return std::max(m_trialPercent,m_best?m_best->bestPercent:0.);}
@@ -47,6 +47,7 @@ public:
     bool showPreview() const { return m_showPreview && m_mode == Mode::Searching; }
     Forecast const& forecast() const { return m_forecast; }
     Forecast const& secondForecast() const { return m_secondForecast; }
+    bool twoPlayerEnabled() const {return m_layer&&m_layer->m_levelSettings&&m_layer->m_levelSettings->m_twoPlayerMode;}
     bool dualEnabled() const {return m_layer&&m_layer->m_gameState.m_isDualMode;}
     PlayLayer* layer() const { return m_layer; }
     void play();
@@ -71,6 +72,7 @@ private:
     std::string m_status = "Готов. Начните запись или поиск.";
     bool m_injecting = false, m_resetting = false, m_restart = false;
     bool m_menuOpen = false, m_pendingHuman = false, m_held = false;
+    bool m_pendingHuman2=false,m_held2=false,m_searchDesired2=false;
     bool m_oldCBS = false, m_oldCOS = false, m_haveOptions = false;
     bool m_verifyingSearch = false, m_releasePending = false;
     double m_accumulator = 0, m_trialPercent = 0;
@@ -95,8 +97,8 @@ private:
     Tick m_flightFrom = 0;
     bool m_guidedFlight = false;
     bool m_searchDesired = false;
-    InputPacer m_inputPacer;
-    InputCommitment m_inputCommitment;
+    InputPacer m_inputPacer,m_inputPacer2;
+    InputCommitment m_inputCommitment,m_secondCommitment;
     std::vector<FlightObstacle> m_flightObstacles;
     double m_spawnFloor = 90;
     Calibration m_calibration,m_secondCalibration;
@@ -125,7 +127,7 @@ private:
     bool prepare();
     void beginAttempt();
     void releaseInput();
-    void inject(bool down);
+    void inject(bool down,int player=1);
     void guideFlight(PlayerObject* player);
     void collectObstacles(double minX, double maxX, double minY, double maxY);
     Macro snapshot(bool complete = false) const;

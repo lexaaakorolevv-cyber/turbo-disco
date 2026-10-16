@@ -35,16 +35,18 @@ void validate(Macro const& m) {
     require(m.timings.size() == m.ticks, "Missing per-tick physics timing");
     for (auto const& t : m.timings)
         require(std::isfinite(t.dt) && t.dt > 0 && t.dt <= 100, "Invalid physics timing");
-    require(m.actions.size() <= m.ticks, "Too many actions");
-    bool held = false;
+    require(m.actions.size() <= 2*m.ticks, "Too many actions");
+    bool held[2]{};
+    int previousPlayer=0;
     Tick previous = 0;
     bool first = true;
     for (auto const& a : m.actions) {
         require(a.tick < m.ticks, "Action outside attempt");
-        require(first || a.tick > previous, "Actions must have strictly increasing ticks");
-        require(a.button == 1 && a.player == 1, "Only jump / player 1 is supported");
-        require(a.down != held, "Redundant or invalid transition");
-        held = a.down;
+        require(first || a.tick > previous || (a.tick==previous&&a.player>previousPlayer), "Actions must have strictly increasing ticks");
+        require(a.button == 1 && a.player >= 1 && a.player <= 2, "Only jump / players 1 and 2 are supported");
+        require(a.down != held[a.player-1], "Redundant or invalid transition");
+        held[a.player-1] = a.down;
+        previousPlayer=a.player;
         previous = a.tick;
         first = false;
     }
@@ -75,7 +77,7 @@ void validate(Macro const& m) {
 
 json toJson(Macro const& m) {
     validate(m);
-    json j = {{"format", "routefinder"}, {"schema", 2}, {"environment", m.environment},
+    json j = {{"format", "routefinder"}, {"schema", 3}, {"environment", m.environment},
         {"ticks", m.ticks}, {"outer_updates", m.outerUpdates}, {"best_percent", m.bestPercent}, {"completed", m.completed},
         {"verified_from_start", m.verified}, {"attempts", m.attempts},
         {"search_seed", m.searchSeed}, {"search_max_cps", m.searchMaxCps}, {"stop_reason", m.stopReason},
@@ -94,7 +96,7 @@ json toJson(Macro const& m) {
 }
 
 Macro fromJson(json const& j) {
-    require(j.at("format") == "routefinder" && (j.at("schema") == 1 || j.at("schema") == 2), "Unsupported format/schema");
+    require(j.at("format") == "routefinder" && (j.at("schema") == 1 || j.at("schema") == 2 || j.at("schema")==3), "Unsupported format/schema");
     Macro m;
     m.environment = j.at("environment");
     m.ticks = uintField(j.at("ticks"));
@@ -118,12 +120,12 @@ Macro fromJson(json const& j) {
         require(t.is_array() && t.size() == 3, "Invalid timing entry");
         m.timings.push_back({number(t.at(0)), t.at(1).get<bool>(), t.at(2).get<bool>()});
     }
-    require(actions.is_array() && actions.size() <= MaxTicks, "Invalid actions array");
+    require(actions.is_array() && actions.size() <= 2*MaxTicks, "Invalid actions array");
     require(trace.is_array() && trace.size() <= MaxTicks, "Invalid trace array");
     for (auto const& a : actions) {
-        require(uintField(a.at("button")) == 1 && uintField(a.at("player")) == 1,
+        require(uintField(a.at("button")) == 1 && uintField(a.at("player")) >= 1 && uintField(a.at("player")) <= (j.at("schema")==3?2:1),
             "Unsupported button/player");
-        m.actions.push_back({uintField(a.at("tick")), a.at("down").get<bool>(), 1, 1});
+        m.actions.push_back({uintField(a.at("tick")), a.at("down").get<bool>(), 1, static_cast<int>(uintField(a.at("player")))});
     }
     for (auto const& s : trace) {
         auto flags = uintField(s.at("flags"));
@@ -131,7 +133,7 @@ Macro fromJson(json const& j) {
         m.trace.push_back({uintField(s.at("tick")), number(s.at("x")), number(s.at("y")),
             number(s.at("vy")), number(s.at("speed")), number(s.at("size")),
             number(s.at("dt")), static_cast<std::uint32_t>(flags)});
-        if(j.at("schema")==2){
+        if(j.at("schema")>=2){
             auto const&p=s.at("player2");if(!p.is_null()){
                 auto pf=uintField(p.at("flags"));require(pf<=UINT32_MAX,"Invalid player2 flags");
                 m.trace.back().second=PlayerSample{number(p.at("x")),number(p.at("y")),number(p.at("vy")),number(p.at("speed")),number(p.at("size")),static_cast<std::uint32_t>(pf)};
@@ -200,18 +202,18 @@ bool sameSample(Sample const& a, Sample const& b) {
         std::abs(a.size - b.size) <= 1e-7 && std::abs(a.dt - b.dt) <= 1e-8;
 }
 
-bool heldBefore(std::vector<Action> const& actions, Tick tick) {
-    bool held = false;
-    for (auto const& a : actions) {
-        if (a.tick >= tick) break;
-        held = a.down;
-    }
+bool heldBefore(std::vector<Action> const& actions, Tick tick, int player) {
+    auto it=std::lower_bound(actions.begin(),actions.end(),tick,[](Action const&a,Tick t){return a.tick<t;});
+    while(it!=actions.begin()){--it;if(it->player==player)return it->down;}
+    bool held=false;
     return held;
 }
-void appendAction(std::vector<Action>& actions, Tick tick, bool down) {
-    if (!actions.empty() && actions.back().tick == tick) actions.pop_back();
-    if (actions.empty() ? down : actions.back().down != down)
-        actions.push_back({tick, down, 1, 1});
+void appendAction(std::vector<Action>& actions,Tick tick,bool down,int player){
+    if(player<1||player>2)throw std::invalid_argument("Invalid input player");
+    auto it=std::lower_bound(actions.begin(),actions.end(),std::pair{tick,player},[](Action const&a,auto key){return std::pair{a.tick,a.player}<key;});
+    if(it!=actions.end()&&it->tick==tick&&it->player==player)it=actions.erase(it);
+    bool held=heldBefore(actions,tick,player);
+    if(down!=held)actions.insert(it,{tick,down,1,player});
 }
 std::vector<Action> prefix(std::vector<Action> const& actions, Tick end) {
     auto it = std::lower_bound(actions.begin(), actions.end(), end,
@@ -240,7 +242,8 @@ void Search::observe(std::vector<Action> const& actions, Tick death, double perc
             if (!m_focusBase[i].down) continue;
             if (m_focusBase[i].tick + std::max<Tick>(m_window, 240) < death) break;
             ++pulses;
-            std::size_t release = i + 1 < m_focusBase.size() ? i + 1 : i;
+            std::size_t release=i;
+            for(std::size_t j=i+1;j<m_focusBase.size();++j)if(m_focusBase[j].player==m_focusBase[i].player){release=j;break;}
             if (release == i) for (int beforeDeath : {1, 2, 4, 8, 16, 32, 64, 96, 128})
                 m_focusEdits.push_back({i, i, -beforeDeath, true});
             for (int shift : {-1, 1, -2, 2, -4, 4, -8, 8, -16, 16, -32, 32}) {
@@ -283,11 +286,14 @@ void Search::preferTiming(int direction) {
         return std::abs(a.delta)<std::abs(b.delta);
     });
 }
+void Search::preferPlayer(int player){
+    std::stable_sort(m_focusEdits.begin(),m_focusEdits.end(),[&](auto const&a,auto const&b){return (m_focusBase[a.first].player==player)>(m_focusBase[b.first].player==player);});
+}
 bool Search::issue(std::vector<Action> const& actions) {
     std::uint64_t hash = 1469598103934665603ULL;
     auto mix = [&](std::uint64_t v) { hash = (hash ^ v) * 1099511628211ULL; };
     mix(m_guidanceFrom); mix(m_policy);
-    for (auto const& a : actions) { mix(a.tick); mix(a.down); }
+    for (auto const& a : actions) { mix(a.tick); mix(a.down); mix(a.player); }
     if (m_issued.size() >= 8192) m_issued.clear();
     return m_issued.insert(hash).second;
 }
@@ -310,9 +316,9 @@ std::vector<Action> Search::next(Tick limit) {
         if (m_focusBase.empty() || m_focusBase.back().tick >= limit) continue;
         if (edit.release) {
             auto tick = static_cast<std::int64_t>(m_focusDeath) + edit.delta;
-            if (tick <= static_cast<std::int64_t>(m_focusBase.back().tick) || tick >= static_cast<std::int64_t>(limit)) continue;
+            if (tick <= static_cast<std::int64_t>(m_focusBase[edit.first].tick) || tick >= static_cast<std::int64_t>(limit)) continue;
             auto result = m_focusBase;
-            appendAction(result, static_cast<Tick>(tick), false);
+            appendAction(result, static_cast<Tick>(tick), false,m_focusBase[edit.first].player);
             m_policy = m_focusPolicy;
             m_guidanceFrom = std::min(limit, m_focusDeath + 1);
             if (issue(result)) { m_phase = SearchPhase::Timing; return result; }
@@ -334,6 +340,8 @@ std::vector<Action> Search::next(Tick limit) {
     for (int retry = 0; retry < 64; ++retry) {
         auto generation = m_generation++;
         auto const& parent = m_elites[generation % 3 == 2 ? m_rng() % m_elites.size() : 0];
+        bool independent=std::any_of(parent.actions.begin(),parent.actions.end(),[](auto const&a){return a.player==2;});
+        int control=independent?1+generation%2:1;
         Tick window = std::min<Tick>(m_window * (1 + m_stale / 16), 2400);
         Tick death = std::min(parent.deathTick, limit - 1);
         static constexpr Tick rollback[]{120, 64, 192, 32, 256, 96, 384, 512};
@@ -347,10 +355,10 @@ std::vector<Action> Search::next(Tick limit) {
             // repeatedly changing one ineffective input at the same frontier.
             start = death > window ? death - window : 0;
             result = prefix(parent.actions, start);
-            bool held = heldBefore(result, start);
+            bool held = heldBefore(result, start,control);
             static constexpr Tick intervals[]{30, 60, 90, 120, 180, 240, 360, 480, 720};
             for (Tick t = start, edits=0; t < std::min(limit, death + 120) && edits<6; t += intervals[m_rng() % 9],++edits)
-                appendAction(result, t, held = !held);
+                appendAction(result, t, held = !held,control);
             m_guidanceFrom = result.empty() ? start : result.back().tick + 1;
             m_phase = SearchPhase::Explore;
         } else if (kind == 0 || kind == 1 || kind == 4) {
@@ -372,20 +380,20 @@ std::vector<Action> Search::next(Tick limit) {
             result[index].tick = static_cast<Tick>(std::clamp<std::int64_t>(shifted, 0, limit - 1));
             std::stable_sort(result.begin(), result.end(), [](auto const& a, auto const& b) { return a.tick < b.tick; });
             auto raw = std::move(result); result.clear();
-            for (auto const& a : raw) appendAction(result, a.tick, a.down);
+            for (auto const& a : raw) appendAction(result, a.tick, a.down,a.player);
             m_guidanceFrom = result.empty() ? 0 : result.back().tick + 1;
         } else {
             if (kind == 5) start = death > window ? death - window : 0;
             result = prefix(parent.actions, start);
-            bool down = heldBefore(result, start);
+            bool down = heldBefore(result, start,control);
             if (kind == 5) {
                 for (Tick t = start; t < std::min(limit, death + 120); t += 15 + m_rng() % 105)
-                    appendAction(result, t, down = !down);
+                    appendAction(result, t, down = !down,control);
             } else {
                 static constexpr Tick holds[]{1, 4, 8, 16, 32, 64, 128, 240, 480};
-                appendAction(result, start, !down);
+                appendAction(result, start, !down,control);
                 Tick end = start + holds[(generation / 6) % 9];
-                if (generation % 18 != 3 && end < limit) appendAction(result, end, down);
+                if (generation % 18 != 3 && end < limit) appendAction(result, end, down,control);
             }
             m_guidanceFrom = result.empty() ? start : result.back().tick + 1;
         }

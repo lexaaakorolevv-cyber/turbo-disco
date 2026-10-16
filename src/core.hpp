@@ -13,7 +13,7 @@
 namespace rf {
 using Tick = std::uint64_t;
 inline constexpr Tick MaxTicks = 240 * 1800;
-inline constexpr char ModVersion[] = "1.8.0";
+inline constexpr char ModVersion[] = "1.9.0";
 
 struct Action {
     Tick tick = 0;
@@ -71,8 +71,8 @@ nlohmann::json loadJsonFile(std::filesystem::path const& path);
 nlohmann::json compactPlan(std::vector<Action> const& actions);
 std::vector<Action> expandPlan(nlohmann::json const& value, Tick end = MaxTicks);
 bool sameSample(Sample const& expected, Sample const& actual);
-bool heldBefore(std::vector<Action> const& actions, Tick tick);
-void appendAction(std::vector<Action>& actions, Tick tick, bool down);
+bool heldBefore(std::vector<Action> const& actions, Tick tick, int player=1);
+void appendAction(std::vector<Action>& actions, Tick tick, bool down, int player=1);
 std::vector<Action> prefix(std::vector<Action> const& actions, Tick endExclusive);
 
 // Bounded elitist search scored only by actual game attempts. Each genome is
@@ -98,6 +98,7 @@ public:
     std::uint64_t staleAttempts() const { return m_stale; }
     Tick window() const { return m_window; }
     void preferTiming(int direction);
+    void preferPlayer(int player);
     nlohmann::json snapshot() const;
     static Search restore(nlohmann::json const& value);
 private:

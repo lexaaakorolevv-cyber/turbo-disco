@@ -14,11 +14,11 @@ struct Interaction {
 double approachCost(FormState const& state,std::span<Obstacle const> objects,double time,double dt);
 double formCost(FormState const& state,FormState const& previous,bool down,double dt,double centre,double bias=0);
 bool equivalentFormStates(FormState const& a,FormState const& b);
-struct DualDecision {bool down=false;double survival=0;Forecast first,second;ControlPlan plan;};
+struct DualDecision {bool down=false;double survival=0;Forecast first,second;ControlPlan plan;bool secondDown=false;ControlPlan secondPlan;};
 DualDecision chooseDualInput(FormState const& first,FormState const& second,
     std::span<Obstacle const> obstacles,std::span<Interaction const> firstInteractions,
-    std::span<Interaction const> secondInteractions,FailureMemory const* failures=nullptr,bool includeForecast=true);
-struct FormDecision {bool down=false;double survival=0;Forecast forecast;ControlPlan plan;};
+    std::span<Interaction const> secondInteractions,FailureMemory const* failures=nullptr,bool includeForecast=true,bool independent=false);
+struct FormDecision {bool down=false;double survival=0;Forecast forecast;ControlPlan plan;bool handoff=false;};
 // Approximate forward model only; it never mutates a Geometry Dash object.
 // The real game and full replay remain the final judges.
 bool advanceForm(FormState& state,bool down,double dt,std::span<Obstacle const> obstacles,

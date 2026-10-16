@@ -111,7 +111,7 @@ FormState Runtime::readState(PlayerObject* p) const {
     s.vx=std::abs(p->getCurrentXVelocity())*(p->m_isGoingLeft?-1:1);
     auto rect=p->getObjectRect();s.halfWidth=std::clamp(static_cast<double>(rect.size.width)/2,2.,50.);
     s.halfHeight=std::clamp(static_cast<double>(rect.size.height)/2,2.,50.);
-    s.scale=p->m_vehicleSize;s.inverted=p->m_isUpsideDown;s.grounded=p->m_isOnGround;s.held=m_held;
+    s.scale=p->m_vehicleSize;s.inverted=p->m_isUpsideDown;s.grounded=p->m_isOnGround;s.held=twoPlayerEnabled()&&p==m_layer->m_player2?m_held2:m_held;
     s.gravity=std::abs(p->m_gravity);s.gravityMod=std::clamp(static_cast<double>(std::abs(p->m_gravityMod)),.05,10.);
     s.jump=std::abs(p->m_yStart);s.floor=m_spawnFloor;s.ceiling=1e6;
     if(dualEnabled()||s.form!=Form::Cube&&s.form!=Form::Robot){
@@ -119,8 +119,9 @@ FormState Runtime::readState(PlayerObject* p) const {
         if(std::isfinite(bottom)&&std::isfinite(top)&&top-bottom>2*s.halfHeight+8&&s.y>=bottom-30&&s.y<=top+30){s.floor=bottom;s.ceiling=top;}
         else if(s.form==Form::Ship||s.form==Form::Wave||s.form==Form::Ufo||s.form==Form::Swing){s.floor=s.y-150;s.ceiling=s.y+150;}
     }
-    s.pressRemaining=m_inputPacer.pressRemainingFrames(m_outerUpdates)/4.;
-    s.pressInterval=m_inputPacer.pressIntervalFrames()/4.;s.robotTime=p==m_layer->m_player2?m_robotTime2:m_robotTime;s.ringArmed=!p->m_touchedRing;return s;
+    auto const&pacer=twoPlayerEnabled()&&p==m_layer->m_player2?m_inputPacer2:m_inputPacer;
+    s.pressRemaining=pacer.pressRemainingFrames(m_outerUpdates)/4.;
+    s.pressInterval=pacer.pressIntervalFrames()/4.;s.robotTime=p==m_layer->m_player2?m_robotTime2:m_robotTime;s.ringArmed=!p->m_touchedRing;return s;
 }
 void Runtime::updateIntelligence(PlayerObject* p){
     auto observe=[&](PlayerObject* player,Calibration& calibration,FormState& observation,double& robot,double& previous){
@@ -209,15 +210,18 @@ void Runtime::collectInteractions(PlayerObject* player,double minX,double maxX,d
     m_guidanceNote=complex?"Dash/custom/телепорт: ограниченный прогноз":"Прогноз приближённый";
 }
 void Runtime::guideFlight(PlayerObject* player){
-    if(player->m_isDashing||(dualEnabled()&&m_layer->m_player2->m_isDashing)){m_inputCommitment.reset();m_guidanceClock.reset();m_guidanceNote="Dash: ограниченный прогноз, текущий ввод сохранён";m_forecast={};m_secondForecast={};return;}
-    if(m_tick<m_flightFrom){m_inputCommitment.reset();m_forecast={};m_secondForecast={};return;}
+    if(player->m_isDashing||(dualEnabled()&&m_layer->m_player2->m_isDashing)){m_inputCommitment.reset();m_secondCommitment.reset();m_guidanceClock.reset();m_guidanceNote="Dash: ограниченный прогноз, текущий ввод сохранён";m_forecast={};m_secondForecast={};return;}
+    if(m_tick<m_flightFrom){m_inputCommitment.reset();m_secondCommitment.reset();m_forecast={};m_secondForecast={};return;}
     auto count=m_layer->m_objects?m_layer->m_objects->count():0;
     if(count!=m_sceneObjectCount)rebuildSceneCache();
     std::uint64_t events=player->m_touchedRings.size()*16ULL+player->m_touchedPad*1ULL+
         player->m_touchedRing*2ULL+player->m_touchedGravityPortal*4ULL+player->m_isOnSlope*8ULL+(dualEnabled()?(1ULL<<60):0);
     std::uint64_t contact=player->m_ringRelatedSet.size()*256ULL+player->m_touchedRing*2ULL+player->m_touchedGravityPortal*4ULL+player->m_isOnSlope*8ULL;
     if(dualEnabled())contact^=(m_layer->m_player2->m_ringRelatedSet.size()*256ULL+m_layer->m_player2->m_touchedRing*2ULL+m_layer->m_player2->m_touchedGravityPortal*4ULL)<<24;
-    if(m_inputCommitment.sample(m_outerUpdates/4.,m_observation,contact,m_searchDesired,dualEnabled()?&m_secondObservation:nullptr)){m_cachedDesired=m_searchDesired;return;}
+    bool pendingFirst=m_searchDesired,pendingSecond=m_searchDesired2;
+    bool committed=m_inputCommitment.sample(m_outerUpdates/4.,m_observation,contact,pendingFirst,dualEnabled()?&m_secondObservation:nullptr);
+    if(twoPlayerEnabled()&&dualEnabled())committed=m_secondCommitment.sample(m_outerUpdates/4.,m_secondObservation,contact,pendingSecond,&m_observation)&&committed;
+    if(committed){m_searchDesired=pendingFirst;m_searchDesired2=pendingSecond;m_cachedDesired=m_searchDesired;return;}
     bool firstNeeds=m_guidanceClock.needsPlan(m_outerUpdates,m_observation,events,m_inputEdges),secondNeeds=false;
     if(dualEnabled())secondNeeds=m_secondGuidanceClock.needsPlan(m_outerUpdates,m_secondObservation,
         m_layer->m_player2->m_ringRelatedSet.size()*16ULL+m_layer->m_player2->m_touchedRing,m_inputEdges);
@@ -236,11 +240,14 @@ void Runtime::guideFlight(PlayerObject* player){
     if(dualEnabled()){
         auto firstInteractions=m_interactions;
         collectInteractions(m_layer->m_player2,minX,maxX,second.y-450,second.y+450);m_secondInteractions=std::move(m_interactions);m_interactions=std::move(firstInteractions);
-        auto decision=chooseDualInput(s,second,m_flightObstacles,m_interactions,m_secondInteractions,&m_failures,m_showPreview);
+        auto decision=chooseDualInput(s,second,m_flightObstacles,m_interactions,m_secondInteractions,&m_failures,m_showPreview,twoPlayerEnabled());
         m_inputCommitment.begin(decision.plan,m_outerUpdates/4.,m_observation,contact,&m_secondObservation);
-        m_searchDesired=decision.down;if(m_showPreview){m_forecast=std::move(decision.first);m_secondForecast=std::move(decision.second);}
-        m_guidanceNote="Dual: совместный прогноз двух игроков";m_cachedDesired=m_searchDesired;return;
+        m_searchDesired=decision.down;m_searchDesired2=decision.secondDown;
+        if(twoPlayerEnabled())m_secondCommitment.begin(decision.secondPlan,m_outerUpdates/4.,m_secondObservation,contact,&m_observation);
+        if(m_showPreview){m_forecast=std::move(decision.first);m_secondForecast=std::move(decision.second);}
+        m_guidanceNote=twoPlayerEnabled()?"2-player: независимые кнопки, совместный маршрут":"Dual: совместный прогноз двух игроков";m_cachedDesired=m_searchDesired;return;
     }
+    m_searchDesired2=false;m_secondCommitment.reset();
     auto policy=m_search?m_search->policy():0;
     bool interactive=std::any_of(m_interactions.begin(),m_interactions.end(),[&](auto const&i){return std::abs((i.area.left+i.area.right)/2-s.x)<std::abs(s.vx)*42+s.halfWidth;});
     bool ramps=std::any_of(m_flightObstacles.begin(),m_flightObstacles.end(),[](auto const&o){return o.ramp;});
@@ -273,7 +280,7 @@ void Runtime::guideFlight(PlayerObject* player){
 }
 void Runtime::rememberFailure(GameObject* object,PlayerObject* deadPlayer){
     auto s=readState(deadPlayer?deadPlayer:m_layer->m_player1);m_observation=s;
-    FailureRecord f;f.form=s.form;f.x=s.x;f.y=s.y;f.vy=s.vy;f.held=m_held;f.inverted=s.inverted;f.mini=s.scale<.9;
+    FailureRecord f;f.form=s.form;f.x=s.x;f.y=s.y;f.vy=s.vy;f.held=s.held;f.inverted=s.inverted;f.mini=s.scale<.9;
     f.object=object?static_cast<std::uint64_t>(object->m_objectID):0;
     if(s.form==Form::Cube||s.form==Form::Robot)f.kind=s.grounded||s.vy*(s.inverted?-1:1)>=0?FailureKind::LatePress:FailureKind::EarlyPress;
     else if(s.form==Form::Ship||s.form==Form::Wave||s.form==Form::Ufo){
@@ -284,13 +291,13 @@ void Runtime::rememberFailure(GameObject* object,PlayerObject* deadPlayer){
 }
 void Runtime::takeControl(){
     if(m_mode!=Mode::Searching||m_restart){m_status="Помощь доступна во время активной попытки поиска";return;}
-    m_mode=Mode::Assisting;m_pendingHuman=false;m_forecast={};m_status="Управление у игрока. Кнопка HELP возвращает боту";
+    m_mode=Mode::Assisting;m_pendingHuman=m_pendingHuman2=false;m_inputCommitment.reset();m_secondCommitment.reset();m_forecast={};m_secondForecast={};m_status="Управление у игрока. Кнопка HELP возвращает боту";
 }
 void Runtime::returnToBot(){
     if(m_mode!=Mode::Assisting){m_status="Сейчас управление у бота";return;}
     m_plan=prefix(m_trial.actions,m_tick);m_cursor=m_plan.size();m_flightFrom=m_tick;
-    m_guidanceClock.reset();m_inputCommitment.reset();
-    m_searchDesired=m_held;m_mode=Mode::Searching;m_pendingHuman=false;m_autosaveDirty=true;m_autosaveUrgent=true;
+    m_guidanceClock.reset();m_inputCommitment.reset();m_secondCommitment.reset();
+    m_searchDesired=m_held;m_searchDesired2=m_held2;m_mode=Mode::Searching;m_pendingHuman=m_pendingHuman2=false;m_autosaveDirty=true;m_autosaveUrgent=true;
     m_status="Участок помощи записан. Бот продолжает";
 }
 }

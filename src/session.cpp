@@ -19,18 +19,19 @@ std::uint64_t counter(json const& v) {
 }
 nlohmann::json compactPlan(std::vector<Action> const& actions) {
     auto result = nlohmann::json::array();
-    for (auto const& a : actions) result.push_back({a.tick,a.down});
+    for (auto const& a : actions) result.push_back({a.tick,a.down,a.player});
     return result;
 }
 std::vector<Action> expandPlan(nlohmann::json const& value, Tick end) {
-    check(value.is_array() && value.size() <= MaxTicks, "Invalid session action array");
+    check(value.is_array() && value.size() <= 2*MaxTicks, "Invalid session action array");
     std::vector<Action> result; result.reserve(value.size());
-    bool held = false; Tick previous = 0;
+    bool held[2]{}; Tick previous = 0;int previousPlayer=0;
     for (auto const& row : value) {
-        check(row.is_array() && row.size() == 2 && row[1].is_boolean(), "Invalid compact action");
+        check(row.is_array() && (row.size() == 2 || row.size()==3) && row[1].is_boolean(), "Invalid compact action");
         Tick t = integer(row[0]); bool down = row[1].get<bool>();
-        check(t < end && (result.empty() || t > previous) && down != held, "Invalid session action order");
-        result.push_back({t,down,1,1}); previous = t; held = down;
+        auto player=row.size()==3?integer(row[2]):1;check(player==1||player==2,"Invalid compact player");
+        check(t < end && (result.empty() || t > previous || (t==previous&&player>previousPlayer)) && down != held[player-1], "Invalid session action order");
+        result.push_back({t,down,1,static_cast<int>(player)}); previous = t; previousPlayer=player;held[player-1] = down;
     }
     return result;
 }
@@ -67,14 +68,14 @@ Search Search::restore(nlohmann::json const& v) {
     s.m_focusBase=expandPlan(v.at("focus")); s.m_focusDeath=integer(v.at("focus_death"));
     check(s.m_focusDeath<=MaxTicks,"Invalid focus death boundary");
     check(s.m_focusBase.empty() || s.m_focusBase.back().tick<s.m_focusDeath,"Focus extends beyond its attempt");
-    auto const& edits=v.at("edits"); check(edits.is_array() && edits.size()<=160,"Invalid focus queue size");
+    auto const& edits=v.at("edits"); check(edits.is_array() && edits.size()<=256,"Invalid focus queue size");
     for (auto const& e : edits) {
         check(e.is_array() && e.size()==4 && e[2].is_number_integer() && e[3].is_boolean(),"Invalid focus edit");
         check(!e[2].is_number_unsigned() || e[2].get<std::uint64_t>()<=128,"Focus delta overflows signed range");
         auto first=integer(e[0]),last=integer(e[1]); auto delta=e[2].get<std::int64_t>();
         check(first<=last && last<s.m_focusBase.size() && delta>=-128 && delta<=128 && delta!=0,"Invalid focus edit bounds");
         bool release=e[3].get<bool>();
-        check(!release || (delta<0 && last+1==s.m_focusBase.size() && s.m_focusBase.back().down),"Invalid release edit");
+        check(!release || (delta<0 && s.m_focusBase[first].down && first==last && std::none_of(s.m_focusBase.begin()+last+1,s.m_focusBase.end(),[&](auto const&a){return a.player==s.m_focusBase[first].player;})),"Invalid release edit");
         s.m_focusEdits.push_back({static_cast<std::size_t>(first),static_cast<std::size_t>(last),static_cast<int>(delta),release});
     }
     auto const& elites=v.at("elites"); check(elites.is_array() && elites.size()<=ArchiveLimit,"Invalid archive size");

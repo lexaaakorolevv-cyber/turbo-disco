@@ -139,18 +139,18 @@ bool equivalentFormStates(FormState const&a,FormState const&b){
         std::abs(a.y-b.y)<2&&std::abs(a.vy-b.vy)<.5&&std::abs(a.pressRemaining-b.pressRemaining)<.5&&
         (a.form!=Form::Robot||std::abs(a.robotTime-b.robotTime)<.5);
 }
-FormDecision chooseFormInput(FormState const&initial,std::span<Obstacle const>objects,
-    std::span<Interaction const>interactions,FailureMemory const*failures,double bias,bool includeForecast){
+static FormDecision planFormInput(FormState const&initial,std::span<Obstacle const>objects,
+    std::span<Interaction const>interactions,FailureMemory const*failures,double bias,bool includeForecast,unsigned capacity,unsigned depthLimit=56){
     if(!std::isfinite(initial.x)||!std::isfinite(initial.y)||!std::isfinite(initial.vy)||!std::isfinite(initial.vx)||
         !std::isfinite(initial.floor)||!std::isfinite(initial.ceiling)||!std::isfinite(initial.gravity)||!std::isfinite(initial.scale)||initial.gravity<=0||initial.scale<=0||static_cast<int>(initial.form)<0||static_cast<int>(initial.form)>7)return {};
     struct Node{FormState s;std::uint64_t used=0;double cost=0;bool first=false;int trace=0;unsigned short inputs=0;};
     struct Trace{Point p;int parent;};
     std::vector<Trace> tree; if(includeForecast){tree.reserve(7169);tree.push_back({{initial.x,initial.y},-1});}
     std::vector<Obstacle> nearby,danger;nearby.reserve(objects.size());danger.reserve(objects.size());
-    std::vector<Node> beam{{initial}},next;beam.reserve(64);next.reserve(128);
+    std::vector<Node> beam{{initial}},next;beam.reserve(capacity);next.reserve(2*capacity);
     FormDecision result;int bestTrace=0;double time=0;
     double centre=std::isfinite(initial.ceiling)&&initial.ceiling-initial.floor<1500?(initial.floor+initial.ceiling)/2:initial.y;
-    for(int depth=0;depth<56;++depth){double dt=depth<8?.25:depth<24?.5:1.;next.clear();
+    for(int depth=0;depth<depthLimit;++depth){double dt=depth<8?.25:depth<24?.5:1.;next.clear();
         double left=beam.front().s.x,right=left,radius=0;
         for(auto const& n:beam){left=std::min(left,n.s.x-std::abs(n.s.vx)*dt);right=std::max(right,n.s.x+std::abs(n.s.vx)*dt);radius=std::max(radius,n.s.halfWidth*1.7);}
         horizontalCandidates(objects,left,right,radius,time,time+dt,nearby);
@@ -166,12 +166,24 @@ FormDecision chooseFormInput(FormState const&initial,std::span<Obstacle const>ob
         if(next.empty()){if(includeForecast)result.forecast.collision=Point{beam.front().s.x+beam.front().s.vx*dt,beam.front().s.y+beam.front().s.vy*dt};break;}
         std::stable_sort(next.begin(),next.end(),[](auto const&a,auto const&b){return a.cost<b.cost;});beam.clear();
         int counts[2]{};bool both=std::any_of(next.begin(),next.end(),[](auto const&n){return n.first;})&&std::any_of(next.begin(),next.end(),[](auto const&n){return !n.first;});
-        for(auto const&n:next){if(both&&counts[n.first]>=32)continue;bool duplicate=std::any_of(beam.begin(),beam.end(),[&](auto const&b){return n.first==b.first&&n.used==b.used&&equivalentFormStates(n.s,b.s);});
-            if(!duplicate){beam.push_back(n);++counts[n.first];}if(beam.size()==64)break;}
+        for(auto const&n:next){if(both&&counts[n.first]>=capacity/2)continue;bool duplicate=std::any_of(beam.begin(),beam.end(),[&](auto const&b){return n.first==b.first&&n.used==b.used&&equivalentFormStates(n.s,b.s);});
+            if(!duplicate){beam.push_back(n);++counts[n.first];}if(beam.size()==capacity)break;}
         time+=dt;result.down=beam.front().first;result.survival=time;bestTrace=beam.front().trace;result.plan={beam.front().inputs,static_cast<unsigned>(std::min(depth+1,12)),std::min(time,3.)};
-        if(beam.front().s.boundary)break;
+        if(beam.front().s.boundary){result.handoff=true;break;}
     }
     if(includeForecast)for(int i=bestTrace;i>=0;i=tree[i].parent)result.forecast.path.push_back(tree[i].p);
     std::reverse(result.forecast.path.begin(),result.forecast.path.end());result.forecast.down=result.down;result.forecast.survival=result.survival;return result;
 }
+FormDecision chooseFormInput(FormState const&state,std::span<Obstacle const>objects,
+    std::span<Interaction const>interactions,FailureMemory const*failures,double bias,bool preview){
+    auto decision=planFormInput(state,objects,interactions,failures,bias,preview,64);
+    // Spend extra work only at a near dead end. Easy stretches retain the
+    // small beam; a fuller search may preserve a previously pruned escape.
+    if(!decision.handoff&&decision.survival>0&&decision.survival<24){
+        auto rescue=planFormInput(state,objects,interactions,failures,bias,preview,128,80);
+        if(rescue.survival>decision.survival+1e-8)decision=std::move(rescue);
+    }
+    return decision;
+}
+
 }

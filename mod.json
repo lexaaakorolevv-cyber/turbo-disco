@@ -6,9 +6,9 @@
     },
     "id": "local.routefinder",
     "name": "Route Finder",
-    "version": "v1.8.0",
+    "version": "v1.9.0",
     "developer": "Route Finder contributors",
-    "description": "Physics-tick recording, verified replay and bounded solo/shared-dual route search.",
+    "description": "Physics-tick macros, verified solo/shared-dual/independent two-player replay and bounded route search.",
     "settings": {
         "max-attempts": {
             "type": "int",
