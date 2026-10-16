@@ -1,10 +1,10 @@
-# Route Finder 1.11.0 — Geode / C++
+# Route Finder 1.11.1 — Geode / C++
 
 Запись физического ввода, ограниченный поиск прохождения и отдельная проверка полного повтора с начала. Поддерживаются solo, shared-dual и независимый 2-player. Прохождение любого уровня не гарантируется.
 
 Совместимость закреплена: **Geometry Dash 2.2081**, **Geode SDK 5.11.1**, C++23. Пакет Windows содержит DLL x64. Настоящая игра и её FPS в среде сборки недоступны.
 
-[Скачать .geode 1.11.0 для Windows x64](https://github.com/lexaaakorolevv-cyber/turbo-disco/raw/refs/heads/route-finder-windows/downloads/local.routefinder-windows-x64-v1.11.0.geode)
+[Скачать .geode 1.11.1 для Windows x64](https://github.com/lexaaakorolevv-cyber/turbo-disco/raw/refs/heads/route-finder-windows/downloads/local.routefinder-windows-x64-v1.11.1.geode)
 
 ## Управление
 

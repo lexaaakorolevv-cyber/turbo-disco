@@ -173,3 +173,7 @@ Windows x64 **1.10.1** успешно прошла [CI run](https://github.com/l
 Локально итоговые 12 наборов прошли в Release (16.45 с суммарно). Нативный адаптер успешно собран/слинкован/упакован настоящим SDK 5.11.1 для GD 2.2081 на Android ARM64, включая ScrollLayer/TTF интерфейс и числовой AnalysisWorker. Настоящий игровой процесс/UI/FPS в среде сборки недоступны.
 
 Windows x64 **1.11.0**: [CI run](https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38922774914), исходники `63d14260bde6d30432140b9b6798d84854ce2e51`. Все 12 наборов тестов под MSVC, версия, упаковка и PE x64 прошли. Скачанный архив сверён с digest GitHub, .geode — с внутренним SHA256SUMS. Размер: 374863 байт; SHA-256: `7a77f49eb7d9173d9f4fc36b678a7de038f6a29a23c650c3c738099fed16d6ec`. Игра, настоящий UI и FPS здесь не проверены.
+
+## 1.11.1 — invalidation after native impulses
+
+A new regression fails on the previous version: same-outer-update velocity jumps retained cached input. Guidance now invalidates on vertical velocity/gravity-modifier/ring-arming changes, cooldown expiry and explicit pad/contact signatures for both players. Committed short plans invalidate on abrupt non-wave velocity impulses relative to the preceding observation; ordinary gravity and intended wave turns remain valid. Targeted mode/performance/routes/analysis/render-regression suites are used; game-level performance claims require native GD validation.

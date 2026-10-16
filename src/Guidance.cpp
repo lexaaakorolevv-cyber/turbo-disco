@@ -217,15 +217,15 @@ void Runtime::guideFlight(PlayerObject* player){
     if(count!=m_sceneObjectCount)rebuildSceneCache();
     std::uint64_t events=player->m_touchedRings.size()*16ULL+player->m_touchedPad*1ULL+
         player->m_touchedRing*2ULL+player->m_touchedGravityPortal*4ULL+player->m_isOnSlope*8ULL+(dualEnabled()?(1ULL<<60):0);
-    std::uint64_t contact=player->m_ringRelatedSet.size()*256ULL+player->m_touchedRing*2ULL+player->m_touchedGravityPortal*4ULL+player->m_isOnSlope*8ULL;
-    if(dualEnabled())contact^=(m_layer->m_player2->m_ringRelatedSet.size()*256ULL+m_layer->m_player2->m_touchedRing*2ULL+m_layer->m_player2->m_touchedGravityPortal*4ULL)<<24;
+    std::uint64_t contact=player->m_ringRelatedSet.size()*256ULL+player->m_touchedPad*16ULL+player->m_touchedRing*2ULL+player->m_touchedGravityPortal*4ULL+player->m_isOnSlope*8ULL;
+    if(dualEnabled())contact^=(m_layer->m_player2->m_ringRelatedSet.size()*256ULL+m_layer->m_player2->m_touchedPad*16ULL+m_layer->m_player2->m_touchedRing*2ULL+m_layer->m_player2->m_touchedGravityPortal*4ULL)<<24;
     bool pendingFirst=m_searchDesired,pendingSecond=m_searchDesired2;
     bool committed=m_inputCommitment.sample(m_outerUpdates/4.,m_observation,contact,pendingFirst,dualEnabled()?&m_secondObservation:nullptr);
     if(twoPlayerEnabled()&&dualEnabled())committed=m_secondCommitment.sample(m_outerUpdates/4.,m_secondObservation,contact,pendingSecond,&m_observation)&&committed;
     if(committed){m_searchDesired=pendingFirst;m_searchDesired2=pendingSecond;m_cachedDesired=m_searchDesired;return;}
-    bool firstNeeds=m_guidanceClock.needsPlan(m_outerUpdates,m_observation,events,m_inputEdges),secondNeeds=false;
+    bool firstNeeds=m_guidanceClock.needsPlan(m_outerUpdates,m_observation,events,m_inputEdges,contact),secondNeeds=false;
     if(dualEnabled())secondNeeds=m_secondGuidanceClock.needsPlan(m_outerUpdates,m_secondObservation,
-        m_layer->m_player2->m_ringRelatedSet.size()*16ULL+m_layer->m_player2->m_touchedRing,m_inputEdges2);
+        m_layer->m_player2->m_ringRelatedSet.size()*16ULL+m_layer->m_player2->m_touchedRing,m_inputEdges2,contact);
     if(m_smoothSearch&&!firstNeeds&&!secondNeeds){
         m_searchDesired=m_cachedDesired;return;
     }

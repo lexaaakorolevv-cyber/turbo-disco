@@ -22,6 +22,17 @@ int main(){try{
  s.grounded=false;check(clock.needsPlan(2,s,0,0),"Takeoff cached");s.form=Form::Ufo;check(clock.needsPlan(2,s,0,0),"Form change cached");
  check(clock.needsPlan(2,s,16,0),"Orb contact cached");check(clock.needsPlan(2,s,16,1),"Input edge cached");s.x+=100;check(clock.needsPlan(2,s,16,1),"Teleport cached");
  clock.reset();check(clock.needsPlan(2,s,16,1),"Attempt reset kept cache");
+ s.vy+=9;check(clock.needsPlan(2,s,16,1),"Native impulse retained cached input");
+ s.gravityMod=1.5;check(clock.needsPlan(2,s,16,1),"Gravity modifier retained cached input");
+ s.ringArmed=!s.ringArmed;check(clock.needsPlan(2,s,16,1),"Ring rearm retained cached input");
+ check(clock.needsPlan(2,s,16,1,16),"Pad contact retained cached input");
+ check(!clock.needsPlan(2,s,16,1,16),"Unchanged contact redundantly replanned");
+ InputCommitment commitment;ControlPlan held{0xfff,12,3};FormState airborne;
+ airborne.grounded=false;commitment.begin(held,0,airborne,0);bool desired=false;
+ auto moved=airborne;moved.x+=moved.vx*.25;moved.vy-=.25;
+ check(commitment.sample(.25,moved,0,desired),"Ordinary gravity invalidated committed input");
+ moved.x+=moved.vx*.25;moved.vy+=10;
+ check(!commitment.sample(.5,moved,0,desired),"Pad/orb impulse retained committed input");
  FailureMemory memory;double expected=0;for(int i=0;i<256;i++){FailureRecord r;r.x=(i%21-10)*7;r.y=150;r.vy=0;r.held=false;r.count=i%7+1;r.form=Form::Ufo;memory.record(r);}
  s={};s.form=Form::Ufo;s.x=0;s.y=150;s.vy=0;
  for(auto const&r:memory.toJson())if(std::abs(r[2].get<double>())<28)expected+=std::min(r[8].get<unsigned>(),10u)*.6*(1-std::abs(r[2].get<double>())/28);

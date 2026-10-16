@@ -7,16 +7,18 @@ namespace rf {
 // runs on every processCommands boundary. Discrete native events invalidate it.
 class GuidanceClock {
     bool valid=false;
-    std::uint64_t outer=0,events=0,edges=0;
+    std::uint64_t outer=0,events=0,edges=0,contacts=0;
     FormState previous;
 public:
     void reset(){valid=false;}
-    bool needsPlan(std::uint64_t now,FormState const&s,std::uint64_t event,std::uint64_t edge){
-        bool changed=!valid||now!=outer||event!=events||edge!=edges||s.form!=previous.form||
+    bool needsPlan(std::uint64_t now,FormState const&s,std::uint64_t event,std::uint64_t edge,std::uint64_t contact=0){
+        bool changed=!valid||now!=outer||event!=events||edge!=edges||contact!=contacts||s.form!=previous.form||
             s.grounded!=previous.grounded||s.inverted!=previous.inverted||s.held!=previous.held||
+            s.ringArmed!=previous.ringArmed||std::abs(s.vy-previous.vy)>.5||std::abs(s.gravityMod-previous.gravityMod)>1e-6||
+            (s.pressRemaining<=1e-8)!=(previous.pressRemaining<=1e-8)||
             std::abs(s.scale-previous.scale)>1e-6||std::abs(s.vx-previous.vx)>1e-6||
             std::abs(s.x-previous.x)>4||std::abs(s.y-previous.y)>8;
-        if(changed){valid=true;outer=now;events=event;edges=edge;previous=s;}
+        if(changed){valid=true;outer=now;events=event;edges=edge;contacts=contact;previous=s;}
         return changed;
     }
 };
