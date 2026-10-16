@@ -14,6 +14,7 @@ void Runtime::bind(PlayLayer* layer) {
     if (!layer || m_layer == layer) return;
     if (m_layer && m_layer != layer) unbind(m_layer);
     ++m_saveEpoch;
+    cancelAnalysis();m_analysis.reset();m_analysisMessage="Нажмите Analyze для разбора уровня.";
     m_layer = layer;m_environment={};m_recordPercent=0;m_recordKey.clear();
     if(layer->m_level){m_recordKey=fmt::format("record-{}-{}",static_cast<int>(layer->m_level->m_levelID),sha256(std::string(layer->m_level->m_levelString)).toString().substr(0,16));m_recordPercent=Mod::get()->getSavedValue<double>(m_recordKey,0.);if(!std::isfinite(m_recordPercent)||m_recordPercent<0||m_recordPercent>100)m_recordPercent=0;}
     m_best.reset();
@@ -65,6 +66,7 @@ bool Runtime::syncActiveLayer() {
 }
 void Runtime::unbind(PlayLayer* layer) {
     if (m_layer != layer) return;
+    cancelAnalysis();m_analysis.reset();
     if (active()) stop("Выход из уровня");
     autosaveSearch(true);
     releaseInput();
@@ -74,6 +76,7 @@ void Runtime::unbind(PlayLayer* layer) {
     m_releasePending = false;
 }
 void Runtime::setMenuOpen(bool open) {
+    if(!open)cancelAnalysis();
     m_menuOpen = open;
     m_accumulator = 0; // Menu time must never accumulate into catch-up ticks.
     if (open) m_pendingHuman = m_pendingHuman2=false;
@@ -142,6 +145,7 @@ nlohmann::json Runtime::environment() const {
 }
 
 bool Runtime::prepare() {
+    if(analysisBusy()){m_status="Дождитесь завершения Analyze или остановите анализ";return false;}
     if (active()) { m_status = "Сначала остановите текущую операцию"; return false; }
     if (m_layer && m_search && (m_autosaveDirty || m_autosaveUrgent)) autosaveSearch(true);
     m_saveWorker.drain();++m_saveEpoch;

@@ -33,6 +33,7 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
     double low = s.bottom + ry, high = s.top - ry;
     if (high <= low) return s.held;
     double desired = std::clamp((low + high) / 2 + tuning.heightBias * (high - low), low, high);
+    if(tuning.targetY&&std::isfinite(*tuning.targetY))desired=std::clamp(*tuning.targetY+tuning.heightBias*(high-low)*.15,low,high);
 
     // Select a free vertical gap ahead, rather than always aiming through the
     // centre of a wall. Union overlapping obstacle intervals at this slice.
@@ -71,7 +72,11 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
     // local free-space centre.
     bool const wave = s.mode == FlightMode::Wave;
     int const Width = 64;
-    int const Depth = wave ? 40 : 32;
+    int Depth = wave ? 40 : 32;
+    if(std::isfinite(tuning.lookahead)&&tuning.lookahead>52){
+        double horizon=std::clamp(tuning.lookahead,52.,98.),scale=std::clamp(tuning.horizonScale,.7,1.3);
+        Depth=std::max(Depth,wave?16+static_cast<int>(std::ceil((horizon-6)/scale)):8+static_cast<int>(std::ceil((horizon-3)/(2*scale))));
+    }
     // Resolve imminent turns at the outer native 240 Hz step, then use longer
     // segments further away. The old uniform 1/2-unit forecast skipped short
     // wave turns and forced ship corrections to start several inputs early.

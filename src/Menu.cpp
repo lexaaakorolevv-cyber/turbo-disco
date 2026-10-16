@@ -2,6 +2,7 @@
 #include "ui_geometry.hpp"
 #include <Geode/ui/Popup.hpp>
 #include <Geode/ui/GeodeUI.hpp>
+#include <Geode/ui/ScrollLayer.hpp>
 #include <Geode/cocos/draw_nodes/CCDrawNode.h>
 #include <algorithm>
 #include <cmath>
@@ -39,6 +40,35 @@ CCMenuItemSpriteExtra* control(CCObject* target,SEL_MenuHandler callback,char co
  text->setScale(std::min(1.f,(w-14)/std::max(1.f,text->getContentSize().width)));text->setPosition({w/2,h/2});bg->addChild(text);
  auto b=CCMenuItemSpriteExtra::create(bg,target,callback);b->m_scaleMultiplier=1.025f;return b;
 }
+class AnalysisPopup final:public Popup {
+ ScrollLayer* m_scroll=nullptr;CCLabelTTF* m_text=nullptr;std::string m_previous;float m_elapsed=1;
+ bool setup(){
+  auto view=CCDirector::sharedDirector()->getWinSize();
+  if(!Popup::init(460,300))return false;m_bgSprite->setVisible(false);m_closeBtn->setVisible(false);m_closeBtn->setEnabled(false);
+  m_mainLayer->setScale(std::min({1.f,(view.width-24)/460,(view.height-24)/300}));
+  auto skin=CCDrawNode::create();roundRect(skin,0,0,460,300,12,Panel);m_mainLayer->addChild(skin,-1);
+  auto title=label("Analyze · карта уровня",18);title->setPosition({230,275});m_mainLayer->addChild(title);
+  m_scroll=ScrollLayer::create(CCSize{412,198});m_scroll->setPosition({24,60});m_mainLayer->addChild(m_scroll);
+  m_text=label("",12,{388,0});m_text->setHorizontalAlignment(kCCTextAlignmentLeft);m_text->setAnchorPoint({0,1});m_scroll->m_contentLayer->addChild(m_text);
+  m_mainLayer->updateLayout();
+  auto addButton=[&](char const* text,float x,float w,SEL_MenuHandler action){auto b=control(this,action,text,w,32,Card);b->setPosition({x,30});m_buttonMenu->addChild(b);};
+  addButton("Повторить",94,140,menu_selector(AnalysisPopup::restart));
+  addButton("Стоп",238,132,menu_selector(AnalysisPopup::cancel));
+  addButton("Готово",376,120,menu_selector(AnalysisPopup::close));
+  scheduleUpdate();update(0);return true;
+ }
+ void update(float dt)override{
+  auto&r=Runtime::get();r.updateAnalysis();m_elapsed+=dt;if(m_elapsed<.1f)return;m_elapsed=0;
+  auto text=r.analysisText();if(text==m_previous)return;m_previous=text;m_text->setString(text.c_str());
+  float height=std::max(198.f,m_text->getContentSize().height+16);m_scroll->m_contentLayer->setContentSize({412,height});
+  m_text->setPosition({8,height-8});m_scroll->scrollToTop();
+ }
+ void restart(CCObject*){Runtime::get().startAnalysis();m_elapsed=1;}
+ void cancel(CCObject*){Runtime::get().cancelAnalysis();m_elapsed=1;}
+ void close(CCObject*){onClose(nullptr);}
+ void onClose(CCObject* sender)override{Runtime::get().cancelAnalysis();Popup::onClose(sender);}
+public:static AnalysisPopup* create(){auto p=new AnalysisPopup;if(p->setup()){p->autorelease();return p;}delete p;return nullptr;}
+};
 class Menu final:public Popup {
  Ref<PauseLayer> m_pause;Ref<EndLevelLayer> m_end;
  std::array<std::vector<CCMenuItemSpriteExtra*>,3> m_buttons;
@@ -65,7 +95,8 @@ class Menu final:public Popup {
   auto metric=[&](char const* text,float x){auto card=tile(130,48,Card);card->setPosition({x-65,157});m_mainLayer->addChild(card);m_botNodes.push_back(card);
    auto name=label(text,9);name->setColor(Muted);name->setPosition({65,35});card->addChild(name);auto value=label("—",20);value->setPosition({65,15});card->addChild(value);return value;};
   m_attempts=metric("Попытки",92);m_best=metric("Лучший результат",230);m_time=metric("Осталось",368);
-  auto start=add("Найти прохождение",0,{230,128},menu_selector(Menu::search),412,36,Blue);caption(start)->setColor({255,255,255});
+  add("Analyze",0,{91,128},menu_selector(Menu::analyze),130,36);
+  auto start=add("Найти прохождение",0,{302,128},menu_selector(Menu::search),268,36,Blue);caption(start)->setColor({255,255,255});
   auto stop=add("Остановить",0,{126,83},menu_selector(Menu::stopSearch));caption(stop)->setColor({207,46,65});
   m_helpCaption=caption(add("Ручная помощь",0,{334,83},menu_selector(Menu::help)));
   add("Записать вручную",1,{126,175},menu_selector(Menu::record));add("Загрузить макрос",1,{334,175},menu_selector(Menu::loadMacro));
@@ -98,6 +129,7 @@ class Menu final:public Popup {
  void help(CCObject*){auto&r=Runtime::get();if(r.assisting())r.returnToBot();else r.takeControl();continueRun();}
  void smooth(CCObject*){Runtime::get().toggleSmooth();m_elapsed=1;}
  void limits(CCObject*){geode::openSettingsPopup(Mod::get());}
+ void analyze(CCObject*){auto&r=Runtime::get();if(!r.analysisReady())r.startAnalysis();if(auto p=AnalysisPopup::create())p->show();}
  void search(CCObject*){Runtime::get().startSearch();continueRun();}void stopSearch(CCObject*){Runtime::get().stop();m_elapsed=1;}
  void saveMacro(CCObject*){Runtime::get().save();m_elapsed=1;}void loadMacro(CCObject*){Runtime::get().load();m_elapsed=1;}
  void playMacro(CCObject*){Runtime::get().play();continueRun();}void record(CCObject*){Runtime::get().startRecording();continueRun();}

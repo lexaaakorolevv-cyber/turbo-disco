@@ -25,6 +25,8 @@ struct FlightTuning {
     double heightBias = 0; // Fraction of the native flight height.
     double horizonScale = 1;
     double clearance = 2;
+    double lookahead = 0; // Optional analysis horizon; zero preserves baseline.
+    std::optional<double> targetY;
 };
 FlightTuning flightTuning(unsigned long long attempt, unsigned long long seed);
 

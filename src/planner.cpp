@@ -160,6 +160,7 @@ static FormDecision planFormInput(FormState const&initial,std::span<Obstacle con
     FormDecision result;int bestTrace=0;double time=0;
     bool chain=hasInteractionChain(initial,interactions);std::vector<Interaction> activeInteractions;activeInteractions.reserve(interactions.size());
     double centre=std::isfinite(initial.ceiling)&&initial.ceiling-initial.floor<1500?(initial.floor+initial.ceiling)/2:initial.y;
+    if(initial.routeTarget&&std::isfinite(*initial.routeTarget))centre=*initial.routeTarget;
     for(int depth=0;depth<depthLimit;++depth){double dt=depth<8?.25:depth<24?.5:1.;next.clear();
         double left=beam.front().s.x,right=left,radius=0;
         for(auto const& n:beam){left=std::min(left,n.s.x-std::abs(n.s.vx)*dt);right=std::max(right,n.s.x+std::abs(n.s.vx)*dt);radius=std::max(radius,n.s.halfWidth*1.7);}
@@ -194,7 +195,9 @@ planningFinished:
 }
 FormDecision chooseFormInput(FormState const&state,std::span<Obstacle const>objects,
     std::span<Interaction const>interactions,FailureMemory const*failures,double bias,bool preview,PlanningBudget* budget){
-    auto decision=planFormInput(state,objects,interactions,failures,bias,preview,64,hasInteractionChain(state,interactions)?80:56,budget);
+    unsigned depth=state.planningHorizon>66?112:state.planningHorizon>42?80:56;
+    if(hasInteractionChain(state,interactions))depth=std::max(depth,80u);
+    auto decision=planFormInput(state,objects,interactions,failures,bias,preview,64,depth,budget);
     // Spend extra work only at a near dead end. Easy stretches retain the
     // small beam; a fuller search may preserve a previously pruned escape.
     if(!decision.handoff&&decision.survival>0&&decision.survival<24){

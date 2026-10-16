@@ -51,7 +51,7 @@ jobs:
               assert z.testzip() is None
               manifest = json.loads(z.read('mod.json'))
               assert manifest['id'] == 'local.routefinder'
-              assert manifest['version'] == 'v1.10.1'
+              assert manifest['version'] == 'v1.11.0'
               assert manifest['geode'] == '5.11.1'
               assert manifest['gd']['win'] == '2.2081'
               assert 'max-cps' not in manifest.get('settings', {})

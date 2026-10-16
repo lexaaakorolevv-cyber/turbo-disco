@@ -11,10 +11,12 @@ DualDecision chooseDualInput(FormState const&a,FormState const&b,std::span<Obsta
  std::vector<Node> beam{{a,b}},next;beam.reserve(independent?96:64);next.reserve(independent?384:128);
  std::vector<Trace> tree;if(preview){tree.reserve(7169);tree.push_back({{a.x,a.y},{b.x,b.y},-1});}
  std::vector<Obstacle> nearby,danger;nearby.reserve(objects.size());danger.reserve(objects.size());DualDecision result;int trace=0;double time=0;
- auto centre=[](FormState const&s){return s.ceiling-s.floor<1500?(s.floor+s.ceiling)/2:s.y;};
+ auto centre=[](FormState const&s){if(s.routeTarget&&std::isfinite(*s.routeTarget))return *s.routeTarget;return s.ceiling-s.floor<1500?(s.floor+s.ceiling)/2:s.y;};
  double ca=centre(a),cb=centre(b);bool chain=hasInteractionChain(a,ia)||hasInteractionChain(b,ib);
  std::vector<Interaction> activeA,activeB;activeA.reserve(ia.size());activeB.reserve(ib.size());
- for(int depth=0;depth<(chain?80:56);depth++){
+ unsigned depthLimit=std::max(a.planningHorizon,b.planningHorizon)>66?112:std::max(a.planningHorizon,b.planningHorizon)>42?80:56;
+ if(chain)depthLimit=std::max(depthLimit,80u);
+ for(int depth=0;depth<depthLimit;depth++){
   double dt=depth<8?.25:depth<24?.5:1.;next.clear();double left=beam.front().a.x,right=left,radius=0;
   for(auto const&n:beam)for(auto const*s:{&n.a,&n.b}){left=std::min(left,s->x-std::abs(s->vx)*dt);right=std::max(right,s->x+std::abs(s->vx)*dt);radius=std::max(radius,s->halfWidth*1.7);}
   horizontalCandidates(objects,left,right,radius,time,time+dt,nearby);

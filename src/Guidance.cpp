@@ -233,10 +233,12 @@ void Runtime::guideFlight(PlayerObject* player){
     // deadline must never select a short, blind route or preserve stale input.
     m_guidedFlight=true;
     auto s=m_calibration.adjusted(m_observation);
-    double reach=std::abs(s.vx)*76+s.halfWidth;
+    if(m_analysis){auto hint=m_analysis->hint(s);s.planningHorizon=hint.horizon;s.routeTarget=hint.targetY;}
+    double reach=std::abs(s.vx)*std::max(76.,s.planningHorizon+8)+s.halfWidth;
     double minX=s.x+std::min(0.,s.vx<0?-reach:reach)-s.halfWidth,maxX=s.x+std::max(0.,s.vx<0?-reach:reach)+s.halfWidth;
     auto second=dualEnabled()?m_secondCalibration.adjusted(m_secondObservation):s;
-    if(dualEnabled()){double r=std::abs(second.vx)*76+second.halfWidth;minX=std::min(minX,second.x-r);maxX=std::max(maxX,second.x+r);}
+    if(m_analysis&&dualEnabled()){auto hint=m_analysis->hint(second);second.planningHorizon=hint.horizon;second.routeTarget=hint.targetY;}
+    if(dualEnabled()){double r=std::abs(second.vx)*std::max(76.,second.planningHorizon+8)+second.halfWidth;minX=std::min(minX,second.x-r);maxX=std::max(maxX,second.x+r);}
     collectObstacles(minX,maxX,std::min({s.floor,s.y-500,second.y-500}),std::max(std::min(s.ceiling,s.y+700),std::min(second.ceiling,second.y+700)));
     collectInteractions(player,minX,maxX,s.y-450,s.y+450);
     m_secondForecast={};
@@ -253,9 +255,9 @@ void Runtime::guideFlight(PlayerObject* player){
     }
     m_searchDesired2=false;m_secondCommitment.reset();
     auto policy=m_search?m_search->policy():0;
-    bool interactive=std::any_of(m_interactions.begin(),m_interactions.end(),[&](auto const&i){return std::abs((i.area.left+i.area.right)/2-s.x)<std::abs(s.vx)*42+s.halfWidth;});
+    bool interactive=std::any_of(m_interactions.begin(),m_interactions.end(),[&](auto const&i){return std::abs((i.area.left+i.area.right)/2-s.x)<std::abs(s.vx)*std::max(42.,s.planningHorizon)+s.halfWidth;});
     bool ramps=std::any_of(m_flightObstacles.begin(),m_flightObstacles.end(),[](auto const&o){return o.ramp;});
-    if(interactive||ramps||(s.form!=Form::Cube&&s.form!=Form::Ship&&s.form!=Form::Wave)){
+    if(interactive||ramps||(s.form==Form::Cube&&s.planningHorizon>42)||(s.form!=Form::Cube&&s.form!=Form::Ship&&s.form!=Form::Wave)){
         auto decision=chooseFormInput(s,m_flightObstacles,m_interactions,&m_failures,(static_cast<int>(policy%7)-3)*.07,false);
         if(!decision.plan.steps)return;
         m_inputCommitment.begin(decision.plan,m_outerUpdates/4.,m_observation,contact);
@@ -270,7 +272,7 @@ void Runtime::guideFlight(PlayerObject* player){
         f.x=s.x;f.y=s.y;f.vy=s.vy;f.vx=s.vx;f.halfWidth=s.halfWidth;f.halfHeight=s.halfHeight;
         f.bottom=s.floor;f.top=s.ceiling;f.scale=s.scale;f.gravity=s.gravityMod;f.inverted=s.inverted;f.held=s.held;
         f.pressInterval=s.pressInterval;f.pressRemaining=s.pressRemaining;f.accelerationScales=s.acceleration;f.slopeScale=s.waveSlope;
-        auto tuning=flightTuning(policy+1,m_seed);tuning.heightBias+=m_failures.heightBias(s);
+        auto tuning=flightTuning(policy+1,m_seed);tuning.lookahead=s.planningHorizon>42?s.planningHorizon:0;tuning.targetY=s.routeTarget;tuning.heightBias+=m_failures.heightBias(s);
         m_searchDesired=chooseFlightInput(f,m_flightObstacles,tuning,nullptr,&m_failures);
     }
     // Unsupported scripted/dash rings still activate only through ordinary

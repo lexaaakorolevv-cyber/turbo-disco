@@ -7,6 +7,7 @@
 #include "ground.hpp"
 #include "planner.hpp"
 #include "guidance_clock.hpp"
+#include "analysis.hpp"
 #include <Geode/Geode.hpp>
 #include <chrono>
 #include <memory>
@@ -31,6 +32,12 @@ public:
     void setMenuOpen(bool open);
     void resumeOverlay(PauseLayer* pause, EndLevelLayer* end);
     void startSearch();
+    void startAnalysis();
+    void updateAnalysis();
+    void cancelAnalysis();
+    bool analysisBusy() const {return m_analysisCapturing||m_analysisAwaiting;}
+    bool analysisReady() const {return m_analysis.has_value();}
+    std::string analysisText() const;
     void startRecording();
     void takeControl();
     void returnToBot();
@@ -116,6 +123,12 @@ private:
     bool m_previousDual=false;
     bool m_showPreview = true,m_smoothSearch=true,m_cachedDesired=false;
     GuidanceClock m_guidanceClock,m_secondGuidanceClock;
+    AnalysisWorker m_analysisWorker;
+    std::optional<LevelAnalysis> m_analysis;
+    AnalysisJob m_analysisJob;
+    bool m_analysisCapturing=false,m_analysisAwaiting=false;
+    unsigned m_analysisIndex=0,m_analysisTotal=0;
+    std::string m_analysisMessage="Нажмите Analyze для разбора уровня.";
     std::vector<geode::Ref<GameObject>> m_obstacleObjects,m_interactionObjects;
     unsigned m_sceneObjectCount=0;
     void rebuildSceneCache();

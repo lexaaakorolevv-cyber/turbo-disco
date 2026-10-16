@@ -77,3 +77,9 @@ Shared-dual использует реальный `m_gameState.m_isDualMode`, `m
 Используются существующие `PauseLayer::customSetup`, `CCLabelTTF`, `Mod::getSavedValue<double>/setSavedValue<double>`, `sha256`. В игровом HUD два текстовых узла (значение и тень), без CCMenu/CCDrawNode. Хук кнопки на EndLevelLayer удалён. Открытие BOT ограничено PauseLayer; игровая симуляция не получает новых кнопок HUD.
 
 Для обучения/разбора смертей читаются прежние native координаты, скорость, форма и getObjectRect; новые методы физики не придуманы. P1/P2 имеют отдельные счётчики input edges и историю до 120 наблюдений. Планирование ограничивается локальными числовыми бюджетами. Фоновый работник использует C++ std::thread/mutex/condition_variable и только копии portable структур, JSON и filesystem; вызовов GD/Geode на нём нет.
+
+## Analyze 1.11.0
+
+`src/LevelAnalysis.cpp` читает реальный `PlayLayer::m_objects` как CCArray: `count()`, `objectAtIndex()`; классифицирует `GameObject::m_objectType`/`m_objectID`, читает `getPositionX/Y()`, `getObjectRect()`, `m_groupCount`, `m_isGroupDisabled`, `m_isDisabled`, `m_isTrigger`, `m_isColorTrigger`, `m_slopeIsHazard`. Начальные формы/dual взяты из настоящих `LevelSettingsObject::m_startMode` / `m_startDual`; независимый режим — `m_twoPlayerMode`. Все имена сверены с pinned bindings GD 2.2081 и сборкой SDK.
+
+Это снимок загруженного уровня, а не выдуманный API симуляции. Фоновый `AnalysisWorker` получает только MapObject/числа, строит индекс/отчёт и сохраняет JSON. Никаких методов GD в рабочем потоке нет. Граф коридоров использует AABB и живые границы/размеры персонажа, возвращает только мягкую цель; реальное управление остаётся через прежний native handleButton/processCommands, без checkpoint/state restore.

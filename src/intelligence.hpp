@@ -18,6 +18,8 @@ struct FormState {
     std::array<double,4> acceleration{1,1,1,1};
     double waveSlope=1,controlScale=1,robotHold=15;
     int player=0;
+    double planningHorizon=42; // Optional structural map, native 60 Hz units.
+    std::optional<double> routeTarget;
 };
 struct PhysicsSample {
     FormState state;
