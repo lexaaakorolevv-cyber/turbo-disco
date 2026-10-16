@@ -188,7 +188,7 @@ void Runtime::startSearch() {
     bool resume = Mod::get()->getSettingValue<bool>("auto-resume");
     bool selected = m_selectedForSearch && m_selected && m_selected->environment == m_environment;
     if (!selected && resume && restoreSearch()) return;
-    m_search = std::make_unique<Search>(m_seed, Mod::get()->getSettingValue<int64_t>("mutation-window"));
+    m_search = std::make_unique<Search>(m_seed, Mod::get()->getSettingValue<int64_t>("mutation-window"),twoPlayerEnabled());
     if ((selected || resume) && m_selected && m_selected->environment == m_environment) {
         bool flight = !m_selected->trace.empty() && (m_selected->trace.back().flags & ((1u << 2) | (1u << 5)));
         m_search->observe(m_selected->actions, m_selected->ticks, m_selected->bestPercent, flight);

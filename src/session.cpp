@@ -37,7 +37,7 @@ std::vector<Action> expandPlan(nlohmann::json const& value, Tick end) {
 }
 nlohmann::json Search::snapshot() const {
     std::ostringstream rng; rng.imbue(std::locale::classic()); rng << m_rng;
-    json result{{"schema",1},{"window",m_window},{"generation",m_generation},{"stale",m_stale},
+    json result{{"schema",1},{"independent",m_independent},{"window",m_window},{"generation",m_generation},{"stale",m_stale},
         {"guidance",m_guidanceFrom},{"policy",m_policy},{"choices",m_choices},{"escapes",m_escapeCount},
         {"phase",static_cast<int>(m_phase)},{"rng",rng.str()},{"focus",compactPlan(m_focusBase)},
         {"focus_death",m_focusDeath},{"focus_policy",m_focusPolicy},{"edits",json::array()},{"elites",json::array()}};
@@ -55,7 +55,7 @@ nlohmann::json Search::snapshot() const {
 Search Search::restore(nlohmann::json const& v) {
     check(v.at("schema") == 1,"Unsupported search session schema");
     auto window = integer(v.at("window")); check(window >= 8 && window <= 2400,"Invalid search window");
-    Search s(0,window);
+    Search s(0,window,v.value("independent",false));
     s.m_generation=counter(v.at("generation")); s.m_stale=counter(v.at("stale"));
     s.m_choices=counter(v.at("choices")); s.m_escapeCount=counter(v.at("escapes"));
     s.m_guidanceFrom=integer(v.at("guidance")); check(s.m_guidanceFrom<=MaxTicks,"Invalid guidance boundary");

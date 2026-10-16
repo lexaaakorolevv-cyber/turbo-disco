@@ -129,9 +129,12 @@ int main(){try{
  Macro duo=m;duo.actions=channels;check(fromJson(toJson(duo)).actions==channels,"Macro schema 3 lost P2");
  auto invalid=toJson(duo);std::swap(invalid["actions"][0],invalid["actions"][1]);bool badOrder=false;try{fromJson(invalid);}catch(...){badOrder=true;}check(badOrder,"Reversed simultaneous event order accepted");
  for(bool flip:{false,true})for(int player:{1,2})check(logicalPlayer(nativeButtonSide(player,true,flip),true,flip)==player,"Native player/flip routing mismatch");
- Search multi(1337,120);multi.observe(channels,33,40);auto restored=Search::restore(multi.snapshot());bool secondChanged=false;
+ Search multi(1337,120,true);multi.observe(channels,33,40);auto restored=Search::restore(multi.snapshot());bool secondChanged=false;
  for(int i=0;i<128;i++){auto next=multi.next(500);check(next==restored.next(500),"Independent search resume diverged");check(expandPlan(compactPlan(next),500)==next,"Independent mutation produced invalid controls");secondChanged|=next!=channels&&std::any_of(next.begin(),next.end(),[](auto const&a){return a.player==2;});}
  check(secondChanged,"Search did not retain or mutate P2");
+ Search emptySecond(1337,120,true);emptySecond.observe({},100,10);auto resumedEmpty=Search::restore(emptySecond.snapshot());bool exploredP2=false;
+ for(int i=0;i<128;i++){auto next=emptySecond.next(500);check(next==resumedEmpty.next(500),"Empty P2 channel resume diverged");exploredP2|=std::any_of(next.begin(),next.end(),[](auto const&a){return a.player==2;});}
+ check(exploredP2,"Search never explored a previously unused second channel");
  int roads=0;for(bool inv:{false,true})for(double d:{1.,-1.}){cubeRoad(inv,d);++roads;independentRoad(inv,d);++roads;for(auto form:{Form::Cube,Form::Ball}){dualRoad(form,inv,d);++roads;}}
  std::cout<<roads<<" ordinary, shared-dual and independent-player oracle roads; no idle spam, pad impulses, orb rearming, native portal handoff and two-player desync detection: PASS\n";
 }catch(std::exception const&e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -87,7 +87,7 @@ public:
         double percent = 0;
         bool flight = false;
     };
-    Search(std::uint64_t seed, Tick window);
+    Search(std::uint64_t seed, Tick window,bool independent=false);
     void observe(std::vector<Action> const& actions, Tick deathTick, double percent, bool flight = false);
     std::vector<Action> next(Tick maxTicks);
     Elite const& best() const;
@@ -103,6 +103,7 @@ public:
     static Search restore(nlohmann::json const& value);
 private:
     std::mt19937_64 m_rng;
+    bool m_independent=false;
     Tick m_window;
     std::uint64_t m_generation = 0, m_stale = 0;
     Tick m_guidanceFrom = 0;

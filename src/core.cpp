@@ -221,7 +221,7 @@ std::vector<Action> prefix(std::vector<Action> const& actions, Tick end) {
     return {actions.begin(), it};
 }
 
-Search::Search(std::uint64_t seed, Tick window) : m_rng(seed), m_window(std::clamp<Tick>(window, 8, 2400)) {}
+Search::Search(std::uint64_t seed, Tick window,bool independent) : m_rng(seed), m_independent(independent), m_window(std::clamp<Tick>(window, 8, 2400)) {}
 void Search::observe(std::vector<Action> const& actions, Tick death, double percent, bool flight) {
     auto candidate = Elite{prefix(actions, death), death, percent, flight};
     bool improvement = m_elites.empty() || percent > m_elites.front().percent + 1e-6 ||
@@ -340,7 +340,7 @@ std::vector<Action> Search::next(Tick limit) {
     for (int retry = 0; retry < 64; ++retry) {
         auto generation = m_generation++;
         auto const& parent = m_elites[generation % 3 == 2 ? m_rng() % m_elites.size() : 0];
-        bool independent=std::any_of(parent.actions.begin(),parent.actions.end(),[](auto const&a){return a.player==2;});
+        bool independent=m_independent||std::any_of(parent.actions.begin(),parent.actions.end(),[](auto const&a){return a.player==2;});
         int control=independent?1+generation%2:1;
         Tick window = std::min<Tick>(m_window * (1 + m_stale / 16), 2400);
         Tick death = std::min(parent.deathTick, limit - 1);
