@@ -99,3 +99,5 @@ ctest --test-dir build-core --output-on-failure
 Десять наборов включают JSON/файлы, поиск/сессии, независимые простые трассы форм, shared-dual/2-player, калибровку, анализ смертей, лимиты расчётов, связку двух орбов с посадкой и фоновое сохранение. Это не прохождение настоящей GD. Результаты и сценарии на устройстве: [VALIDATION](docs/VALIDATION.md), реальные API: [API](docs/API.md), формат: [FORMAT](docs/FORMAT.md).
 
 Windows x64 1.10.1 успешно собрана и прошла все одиннадцать наборов тестов: [Windows CI](https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38912388555). Контрольные суммы пакета проверены после скачивания.
+
+Windows x64 1.10.1: [успешная сборка и 11 наборов тестов](https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38914830352), исходники `df116e06ab17a4f9b0da3db92de54e4161110a1f`. Размер пакета: 349773 байт, SHA-256: `a7f538dca7d37b7dbf5cf40a60a1946c176d11b011c60c5a65cd1fd81a9c5298`. Игра и FPS здесь не проверены.
