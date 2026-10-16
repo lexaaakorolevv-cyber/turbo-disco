@@ -23,7 +23,7 @@ struct Node {
     int trace = 0;
 };
 }
-bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle const> obstacles, FlightTuning tuning, Forecast* forecast, FailureMemory const* failures) {
+bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle const> obstacles, FlightTuning tuning, Forecast* forecast, FailureMemory const* failures,PlanningBudget* budget) {
     if (forecast) *forecast = {};
     if (!std::isfinite(s.x) || !std::isfinite(s.y) || !std::isfinite(s.vy) ||
         !std::isfinite(s.vx) || !std::isfinite(s.bottom) || !std::isfinite(s.top) ||
@@ -103,6 +103,7 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
         // climb starts before the wall without chasing an obsolete gap.
         double localTarget = wave ? targetAt(x2 + s.vx * 6) : target;
         for (auto const& node : beam) for (bool down : {false, true}) {
+            if(budget&&!budget->consume())goto planningFinished;
             if (down && !node.held && node.wait > 1e-9) continue;
             auto child = node;
             child.wait = std::max(0., (down && !node.held ? s.pressInterval : node.wait) - segment);
@@ -153,6 +154,7 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
         bestTrace = beam.front().trace;
         time += segment;
     }
+planningFinished:
     if (forecast) {
         for(int i=bestTrace;i>=0;i=tree[i].parent)forecast->path.push_back(tree[i].point);
         std::reverse(forecast->path.begin(),forecast->path.end());forecast->down=answer;forecast->survival=time;

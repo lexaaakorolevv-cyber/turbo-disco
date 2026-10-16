@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <tuple>
 #include <stdexcept>
 
 namespace rf {
@@ -221,9 +222,16 @@ std::vector<Action> prefix(std::vector<Action> const& actions, Tick end) {
     return {actions.begin(), it};
 }
 
+namespace {
+std::uint64_t routeKey(std::vector<Action> const&actions,Tick death){
+    std::uint64_t hash=1469598103934665603ULL;Tick cutoff=death>240?death-120:death;
+    for(auto const&a:actions){if(a.tick>=cutoff)break;hash=(hash^(a.tick/24))*1099511628211ULL;hash=(hash^(a.player*2+a.down))*1099511628211ULL;}
+    return hash;
+}
+}
 Search::Search(std::uint64_t seed, Tick window,bool independent) : m_rng(seed), m_independent(independent), m_window(std::clamp<Tick>(window, 8, 2400)) {}
 void Search::observe(std::vector<Action> const& actions, Tick death, double percent, bool flight) {
-    auto candidate = Elite{prefix(actions, death), death, percent, flight};
+    auto candidate = Elite{prefix(actions, death), death, percent, flight,m_policy,0,routeKey(actions,death)};
     bool improvement = m_elites.empty() || percent > m_elites.front().percent + 1e-6 ||
         (std::abs(percent - m_elites.front().percent) <= 1e-6 && death > m_elites.front().deathTick);
     m_stale = improvement ? 0 : m_stale + 1;
@@ -263,15 +271,14 @@ void Search::observe(std::vector<Action> const& actions, Tick death, double perc
     });
     // Retain several routes to the frontier instead of filling the archive
     // entirely with near-identical failures at the same percentage.
-    std::vector<Elite> diverse;
-    for (auto& elite : m_elites) {
-        auto bucket = static_cast<int>(elite.percent * 4);
-        auto count = std::count_if(diverse.begin(), diverse.end(), [&](auto const& e) {
-            return static_cast<int>(e.percent * 4) == bucket;
-        });
-        if (count < 4) diverse.push_back(std::move(elite));
-        if (diverse.size() == ArchiveLimit) break;
+    std::vector<Elite> diverse;std::vector<bool> selected(m_elites.size());
+    for(int pass=0;pass<2&&diverse.size()<ArchiveLimit;pass++)for(std::size_t i=0;i<m_elites.size();++i){
+        if(selected[i])continue;auto const&elite=m_elites[i];auto bucket=static_cast<int>(elite.percent*4);
+        auto count=std::count_if(diverse.begin(),diverse.end(),[&](auto const&e){return static_cast<int>(e.percent*4)==bucket;});
+        bool same=std::any_of(diverse.begin(),diverse.end(),[&](auto const&e){return static_cast<int>(e.percent*4)==bucket&&e.routeKey==elite.routeKey;});
+        if(count<4&&(pass||!same)){selected[i]=true;diverse.push_back(std::move(m_elites[i]));}if(diverse.size()==ArchiveLimit)break;
     }
+    std::stable_sort(diverse.begin(),diverse.end(),[](auto const&a,auto const&b){if(a.percent!=b.percent)return a.percent>b.percent;if(a.actions.size()!=b.actions.size())return a.actions.size()<b.actions.size();return a.deathTick>b.deathTick;});
     m_elites = std::move(diverse);
 }
 Search::Elite const& Search::best() const {
@@ -288,6 +295,13 @@ void Search::preferTiming(int direction) {
 }
 void Search::preferPlayer(int player){
     std::stable_sort(m_focusEdits.begin(),m_focusEdits.end(),[&](auto const&a,auto const&b){return (m_focusBase[a.first].player==player)>(m_focusBase[b.first].player==player);});
+}
+void Search::preferFailure(int player,Tick tick,int direction,bool duration){
+    auto rank=[&](auto const&e){auto const&a=m_focusBase[e.first];
+        auto distance=a.tick>tick?a.tick-tick:tick-a.tick;
+        bool preferredDuration=duration&&(e.release||e.first==e.last&&!a.down);
+        return std::tuple{a.player!=player,duration&&!preferredDuration,distance,direction&&e.delta*direction<=0,std::abs(e.delta)};};
+    std::stable_sort(m_focusEdits.begin(),m_focusEdits.end(),[&](auto const&a,auto const&b){return rank(a)<rank(b);});
 }
 bool Search::issue(std::vector<Action> const& actions) {
     std::uint64_t hash = 1469598103934665603ULL;
@@ -339,7 +353,12 @@ std::vector<Action> Search::next(Tick limit) {
     std::vector<Action> result;
     for (int retry = 0; retry < 64; ++retry) {
         auto generation = m_generation++;
-        auto const& parent = m_elites[generation % 3 == 2 ? m_rng() % m_elites.size() : 0];
+        std::size_t parentIndex=0;
+        if(generation%3==2){
+            if(m_stale<8)parentIndex=m_rng()%m_elites.size();
+            else for(std::size_t i=1;i<m_elites.size();++i)if(m_elites[i].percent+2>=m_elites.front().percent&&m_elites[i].trials<m_elites[parentIndex].trials)parentIndex=i;
+        }
+        ++m_elites[parentIndex].trials;auto const& parent=m_elites[parentIndex];
         bool independent=m_independent||std::any_of(parent.actions.begin(),parent.actions.end(),[](auto const&a){return a.player==2;});
         int control=independent?1+generation%2:1;
         Tick window = std::min<Tick>(m_window * (1 + m_stale / 16), 2400);
@@ -349,7 +368,7 @@ std::vector<Action> Search::next(Tick limit) {
         if (parent.flight) back = std::min(window, std::max<Tick>(back, 120));
         Tick start = death > back ? death - back : 0;
         auto kind = generation % 6;
-        m_policy = (generation * 17 + generation / 6) % 99;
+        m_policy = (parent.policy+generation * 17 + generation / 6) % 99;
         if (m_stale >= 32 && m_choices % 8 == 0) {
             // Sample a complete tail from a wider rollback, rather than
             // repeatedly changing one ineffective input at the same frontier.

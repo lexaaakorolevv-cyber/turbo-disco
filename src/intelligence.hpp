@@ -16,7 +16,8 @@ struct FormState {
     bool grounded=true,inverted=false,held=false;
     bool ringArmed=true,boundary=false;
     std::array<double,4> acceleration{1,1,1,1};
-    double waveSlope=1;
+    double waveSlope=1,controlScale=1,robotHold=15;
+    int player=0;
 };
 struct PhysicsSample {
     FormState state;
@@ -25,13 +26,14 @@ struct PhysicsSample {
     bool disturbed=false;
 };
 class Calibration {
-    struct Estimate { double ratio=1; unsigned samples=0; };
-    struct Bucket { std::array<Estimate,7> values; };
+    struct Estimate { double ratio=1; unsigned samples=0; double deviation=0; };
+    struct Bucket { std::array<Estimate,8> values; };
     std::array<Bucket,32> m_buckets{};
     std::optional<PhysicsSample> m_previous;
+    bool m_robotBoostSeen=false;
     static std::size_t key(FormState const&);
 public:
-    void resetSampling(){m_previous.reset();}
+    void resetSampling(){m_previous.reset();m_robotBoostSeen=false;}
     void observe(PhysicsSample const& sample);
     FormState adjusted(FormState state) const;
     unsigned samples() const;
@@ -54,6 +56,7 @@ struct FailureRecord {
     bool held=false,inverted=false,mini=false;
     unsigned count=1;
     std::uint64_t object=0;
+    int player=0;
 };
 class FailureMemory {
     std::vector<FailureRecord> m_records;

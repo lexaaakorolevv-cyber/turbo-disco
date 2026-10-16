@@ -59,8 +59,8 @@ bool advanceForm(FormState&s,bool down,double dt,std::span<Obstacle const>object
     if(s.form==Form::Ball&&s.grounded&&rising){s.inverted=!s.inverted;s.vy=sgn*s.jump*mini*.6;s.grounded=false;}
     else if(s.form==Form::Spider&&s.grounded&&rising){if(!snapSpider(s,objects,time))return false;teleported=true;}
     else if((s.form==Form::Cube||s.form==Form::Robot)&&s.grounded&&down){s.vy=sgn*s.jump*mini*(s.form==Form::Robot?.5:1);s.grounded=false;s.robotTime=0;}
-    else if(s.form==Form::Ufo&&rising){double v=(s.scale<.9?8:7)*(s.scale<.9?.85:1);if(s.vy*sgn<v)s.vy=sgn*v;s.grounded=false;}
-    else if(s.form==Form::Swing&&rising){s.inverted=!s.inverted;s.vy*=.8;}
+    else if(s.form==Form::Ufo&&rising){double v=(s.scale<.9?8:7)*(s.scale<.9?.85:1)*s.controlScale;if(s.vy*sgn<v)s.vy=sgn*v;s.grounded=false;}
+    else if(s.form==Form::Swing&&rising){s.inverted=!s.inverted;s.vy*=std::clamp(.8*s.controlScale,0.,1.);}
     sgn=sign(s);double startVy=s.vy;
     if(s.form==Form::Wave)s.vy=std::abs(s.vx)*sgn*(down?1:-1)*(s.scale<.9?2:1)*s.waveSlope;
     else if(s.form==Form::Ship){bool falling=s.vy*sgn<0;int branch=(down?0:2)+(falling?1:0);double a=down?(falling?.4791:.3833):-(falling?.3066:.4599);
@@ -68,7 +68,7 @@ bool advanceForm(FormState&s,bool down,double dt,std::span<Obstacle const>object
         s.vy=std::clamp(s.vy,sgn>0?-6.4/(s.scale<.9?.85:1):-8/(s.scale<.9?.85:1),sgn>0?8/(s.scale<.9?.85:1):6.4/(s.scale<.9?.85:1));
     }else if(s.form==Form::Ufo){s.vy-=sgn*g*(s.vy*sgn<0?.4:.6)/(s.scale<.9?.85:1)*dt;s.vy=sgn*std::clamp(s.vy*sgn,-6.4/(s.scale<.9?.85:1),8/(s.scale<.9?.85:1));}
     else if(s.form==Form::Swing){s.vy-=sgn*g*(s.scale<.9?.6:.4)*dt;s.vy=std::clamp(s.vy,-8.,8.);}
-    else if(!s.grounded){bool boosting=s.form==Form::Robot&&down&&s.robotTime<15&&s.vy*sgn>0;
+    else if(!s.grounded){bool boosting=s.form==Form::Robot&&down&&s.robotTime<s.robotHold&&s.vy*sgn>0;
         if(!boosting)s.vy-=sgn*g*(s.form==Form::Robot?.9:(s.form==Form::Ball||s.form==Form::Spider)?.6:1)*dt;
         if(s.form==Form::Robot){s.robotTime+=dt;if(!down)s.robotTime=16;}
         s.vy=sgn*std::max(s.vy*sgn,-15.);
@@ -78,7 +78,7 @@ bool advanceForm(FormState&s,bool down,double dt,std::span<Obstacle const>object
     // A single long semi-implicit step otherwise invents early landings.
     s.y+=s.form==Form::Wave?s.vy*dt:(startVy+s.vy)*dt/2+(s.vy-startVy)*std::min(dt,.25)/2;
     s.held=down;
-    for(std::size_t i=0;i<interactions.size()&&i<64;++i){auto mask=std::uint64_t(1)<<i;auto const&o=interactions[i];
+    for(std::size_t i=0;i<interactions.size()&&i<64;++i){auto const&o=interactions[i];auto mask=std::uint64_t(1)<<(o.slot<64?o.slot:i);
         if((used&mask)||!forecastOverlap(oldX,oldY,s.x,s.y,s.halfWidth,s.halfHeight,o.area,time,time+dt))continue;
         if(isOrb(o.kind)&&(!down||!s.ringArmed))continue;
         activate(s,o,objects,time+dt);used|=mask;
@@ -111,6 +111,15 @@ bool advanceForm(FormState&s,bool down,double dt,std::span<Obstacle const>object
     }
     return std::isfinite(s.x)&&std::isfinite(s.y)&&std::isfinite(s.vy);
 }
+bool hasInteractionChain(FormState const&s,std::span<Interaction const> interactions){
+    if(std::abs(s.vx)<.1)return false;unsigned count=0;
+    for(auto const&i:interactions){if(i.kind>InteractionKind::BluePad&&i.kind!=InteractionKind::SpiderOrb&&i.kind!=InteractionKind::SpiderPad)continue;
+        double time=((i.area.left+i.area.right)/2-s.x)/s.vx;if(time>=-4&&time<=64&&++count>=2)return true;}
+    return false;
+}
+void interactionCandidates(std::span<Interaction const>source,double left,double right,double radius,double start,double end,std::vector<Interaction>&result){
+    result.clear();for(std::size_t i=0;i<source.size()&&i<64;i++)if(overlapsHorizontal(source[i].area,left,right,radius,start,end)){auto copy=source[i];if(copy.slot>=64)copy.slot=i;result.push_back(copy);}
+}
 double approachCost(FormState const&s,std::span<Obstacle const> objects,double time,double dt){
     if(s.form!=Form::Cube&&s.form!=Form::Robot&&s.form!=Form::Ball&&s.form!=Form::Spider)return 0;
     double nearest=96;
@@ -140,7 +149,7 @@ bool equivalentFormStates(FormState const&a,FormState const&b){
         (a.form!=Form::Robot||std::abs(a.robotTime-b.robotTime)<.5);
 }
 static FormDecision planFormInput(FormState const&initial,std::span<Obstacle const>objects,
-    std::span<Interaction const>interactions,FailureMemory const*failures,double bias,bool includeForecast,unsigned capacity,unsigned depthLimit=56){
+    std::span<Interaction const>interactions,FailureMemory const*failures,double bias,bool includeForecast,unsigned capacity,unsigned depthLimit=56,PlanningBudget* budget=nullptr){
     if(!std::isfinite(initial.x)||!std::isfinite(initial.y)||!std::isfinite(initial.vy)||!std::isfinite(initial.vx)||
         !std::isfinite(initial.floor)||!std::isfinite(initial.ceiling)||!std::isfinite(initial.gravity)||!std::isfinite(initial.scale)||initial.gravity<=0||initial.scale<=0||static_cast<int>(initial.form)<0||static_cast<int>(initial.form)>7)return {};
     struct Node{FormState s;std::uint64_t used=0;double cost=0;bool first=false;int trace=0;unsigned short inputs=0;};
@@ -149,15 +158,18 @@ static FormDecision planFormInput(FormState const&initial,std::span<Obstacle con
     std::vector<Obstacle> nearby,danger;nearby.reserve(objects.size());danger.reserve(objects.size());
     std::vector<Node> beam{{initial}},next;beam.reserve(capacity);next.reserve(2*capacity);
     FormDecision result;int bestTrace=0;double time=0;
+    bool chain=hasInteractionChain(initial,interactions);std::vector<Interaction> activeInteractions;activeInteractions.reserve(interactions.size());
     double centre=std::isfinite(initial.ceiling)&&initial.ceiling-initial.floor<1500?(initial.floor+initial.ceiling)/2:initial.y;
     for(int depth=0;depth<depthLimit;++depth){double dt=depth<8?.25:depth<24?.5:1.;next.clear();
         double left=beam.front().s.x,right=left,radius=0;
         for(auto const& n:beam){left=std::min(left,n.s.x-std::abs(n.s.vx)*dt);right=std::max(right,n.s.x+std::abs(n.s.vx)*dt);radius=std::max(radius,n.s.halfWidth*1.7);}
         horizontalCandidates(objects,left,right,radius,time,time+dt,nearby);
         horizontalCandidates(objects,left-96,right+96,radius,time,time+dt,danger);
+        interactionCandidates(interactions,left,right,radius,time,time+dt,activeInteractions);
         for(auto const&n:beam)for(bool down:{false,true}){
+            if(budget&&!budget->consume())goto planningFinished;
             auto child=n;if(depth==0)child.first=down;if(depth<12&&down)child.inputs|=static_cast<unsigned short>(1u<<depth);
-            if(!advanceForm(child.s,down,dt,nearby,interactions,child.used,time))continue;
+            if(!advanceForm(child.s,down,dt,nearby,activeInteractions,child.used,time))continue;
             child.cost+=formCost(child.s,n.s,down,dt,centre,bias)+approachCost(child.s,danger,time+dt,dt);
             if(failures)child.cost+=failures->penalty(child.s,down)*dt;
             if(includeForecast){tree.push_back({{child.s.x,child.s.y},n.trace});child.trace=static_cast<int>(tree.size()-1);}
@@ -166,21 +178,27 @@ static FormDecision planFormInput(FormState const&initial,std::span<Obstacle con
         if(next.empty()){if(includeForecast)result.forecast.collision=Point{beam.front().s.x+beam.front().s.vx*dt,beam.front().s.y+beam.front().s.vy*dt};break;}
         std::stable_sort(next.begin(),next.end(),[](auto const&a,auto const&b){return a.cost<b.cost;});beam.clear();
         int counts[2]{};bool both=std::any_of(next.begin(),next.end(),[](auto const&n){return n.first;})&&std::any_of(next.begin(),next.end(),[](auto const&n){return !n.first;});
-        for(auto const&n:next){if(both&&counts[n.first]>=capacity/2)continue;bool duplicate=std::any_of(beam.begin(),beam.end(),[&](auto const&b){return n.first==b.first&&n.used==b.used&&equivalentFormStates(n.s,b.s);});
+        if(chain)for(auto const&n:next){
+            bool same=std::any_of(beam.begin(),beam.end(),[&](auto const&b){return b.first==n.first&&b.used==n.used;});
+            if(!same){beam.push_back(n);++counts[n.first];}if(beam.size()==16)break;
+        }
+        for(auto const&n:next){if(both&&counts[n.first]>=static_cast<int>(capacity/2))continue;bool duplicate=std::any_of(beam.begin(),beam.end(),[&](auto const&b){return n.first==b.first&&n.used==b.used&&equivalentFormStates(n.s,b.s);});
             if(!duplicate){beam.push_back(n);++counts[n.first];}if(beam.size()==capacity)break;}
+        if(chain)std::stable_sort(beam.begin(),beam.end(),[](auto const&a,auto const&b){return a.cost<b.cost;});
         time+=dt;result.down=beam.front().first;result.survival=time;bestTrace=beam.front().trace;result.plan={beam.front().inputs,static_cast<unsigned>(std::min(depth+1,12)),std::min(time,3.)};
         if(beam.front().s.boundary){result.handoff=true;break;}
     }
+planningFinished:
     if(includeForecast)for(int i=bestTrace;i>=0;i=tree[i].parent)result.forecast.path.push_back(tree[i].p);
     std::reverse(result.forecast.path.begin(),result.forecast.path.end());result.forecast.down=result.down;result.forecast.survival=result.survival;return result;
 }
 FormDecision chooseFormInput(FormState const&state,std::span<Obstacle const>objects,
-    std::span<Interaction const>interactions,FailureMemory const*failures,double bias,bool preview){
-    auto decision=planFormInput(state,objects,interactions,failures,bias,preview,64);
+    std::span<Interaction const>interactions,FailureMemory const*failures,double bias,bool preview,PlanningBudget* budget){
+    auto decision=planFormInput(state,objects,interactions,failures,bias,preview,64,hasInteractionChain(state,interactions)?80:56,budget);
     // Spend extra work only at a near dead end. Easy stretches retain the
     // small beam; a fuller search may preserve a previously pruned escape.
     if(!decision.handoff&&decision.survival>0&&decision.survival<24){
-        auto rescue=planFormInput(state,objects,interactions,failures,bias,preview,128,80);
+        auto rescue=planFormInput(state,objects,interactions,failures,bias,preview,128,80,budget);
         if(rescue.survival>decision.survival+1e-8)decision=std::move(rescue);
     }
     return decision;

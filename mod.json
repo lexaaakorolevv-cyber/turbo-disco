@@ -6,9 +6,9 @@
     },
     "id": "local.routefinder",
     "name": "Route Finder",
-    "version": "v1.9.0",
+    "version": "v1.10.0",
     "developer": "Route Finder contributors",
-    "description": "Physics-tick macros, verified solo/shared-dual/independent two-player replay and bounded route search.",
+    "description": "Pause-only controls, best-percent HUD, calibrated route-chain search and verified solo/two-player physics-tick macros.",
     "settings": {
         "max-attempts": {
             "type": "int",
@@ -51,16 +51,10 @@
             "description": "Find route restores this level search session when compatible. Disable to start a fresh search. Every attempt still starts from the beginning.",
             "default": true
         },
-        "show-preview": {
-            "type": "bool",
-            "name": "Show forecast path",
-            "description": "Approximate planned path and predicted blocked point. Native GD decides actual collisions.",
-            "default": true
-        },
         "smooth-search": {
             "type": "bool",
             "name": "Lower search load",
-            "description": "Additionally reuse forecasts within one native outer update. Both profiles execute short selected maneuvers and cancel them on native transitions. Recording and replay keep every physics tick.",
+            "description": "Lower: 6000 candidates and a cooperative 3 ms planning target per render frame. Normal: 12000 / 6 ms. Recording and replay keep every native physics tick.",
             "default": true
         }
     }

@@ -68,6 +68,10 @@ bool Runtime::restoreSearch() {
     return false;
 }
 void Runtime::autosaveSearch(bool force) {
+    if(auto result=m_saveWorker.result();result&&result->epoch==m_saveEpoch){
+        if(result->error.empty())m_autosaveStatus=fmt::format("Автосохранено {:.2f}% | Попыток: {}",result->percent,result->attempts);
+        else {m_autosaveStatus="Ошибка автосохранения: "+result->error;m_autosaveDirty=true;}
+    }
     if (!m_search || m_environment.empty() || (m_best && m_best->verified)) return;
     if (!active() && !force && !m_autosaveDirty && !m_autosaveUrgent) return;
     auto now=std::chrono::steady_clock::now();
@@ -84,17 +88,13 @@ void Runtime::autosaveSearch(bool force) {
         auto draft=*m_best; draft.verified=false;
         draft.attempts=m_previousAttempts+m_attempts;
         draft.stopReason="Автосохранение поиска: "+m_status;
-        // Write the independent best draft first: it survives even if saving
-        // the richer search state exceeds its size budget or fails afterwards.
-        if (m_autosaveDirty || force) saveMacro(macroPath(true),draft);
-        auto pending=m_mode==Mode::Assisting?prefix(m_trial.actions,m_tick):m_plan;
-        auto saved=searchSessionJson(draft,*m_search,pending,m_seed,m_previousAttempts+m_attempts,
-            m_previousSeconds+elapsedSeconds());
-        saved["learning"]=m_calibration.toJson();saved["learning_player2"]=m_secondCalibration.toJson();saved["failures"]=m_failures.toJson();
-        saved["pending_guidance"]=m_mode==Mode::Assisting?m_tick:m_flightFrom;
-        saveJsonFile(sessionPath(),saved,-1);
-        m_autosaveDirty=false;
-        m_autosaveStatus=fmt::format("Автосохранено {:.2f}% | Всего попыток: {}",draft.bestPercent,m_previousAttempts+m_attempts);
+        SearchSaveJob job{macroPath(true),sessionPath(),std::move(draft),*m_search,
+            m_mode==Mode::Assisting?prefix(m_trial.actions,m_tick):m_plan};
+        job.seed=m_seed;job.attempts=m_previousAttempts+m_attempts;job.seconds=m_previousSeconds+elapsedSeconds();job.epoch=m_saveEpoch;
+        job.learning=m_calibration.toJson();job.secondLearning=m_secondCalibration.toJson();job.failures=m_failures.toJson();
+        job.guidance=m_mode==Mode::Assisting?m_tick:m_flightFrom;job.writeBest=m_autosaveDirty||force;
+        m_saveWorker.submit(std::move(job));
+        m_autosaveDirty=false;m_autosaveStatus="Сохранение в фоне";
     } catch (std::exception const& e) {
         m_autosaveStatus=fmt::format("Ошибка автосохранения: {}",e.what());
         log::error("Route Finder autosave failed: {}",e.what());

@@ -1,4 +1,5 @@
 #pragma once
+#include "planning_budget.hpp"
 #include <span>
 #include "geometry.hpp"
 
@@ -31,5 +32,5 @@ FlightTuning flightTuning(unsigned long long attempt, unsigned long long seed);
 // or restores Geometry Dash. The live game judges the resulting attempt.
 bool chooseFlightInput(FlightObservation const& state,
     std::span<FlightObstacle const> obstacles, FlightTuning tuning = {}, Forecast* forecast = nullptr,
-    FailureMemory const* failures = nullptr);
+    FailureMemory const* failures = nullptr,PlanningBudget* budget=nullptr);
 }

@@ -31,14 +31,6 @@ class $modify(RouteFinderPauseLayer, PauseLayer) {
     void openBot(CCObject*) { rf::showMenu(this, nullptr); }
 };
 
-class $modify(RouteFinderEndLevelLayer, EndLevelLayer) {
-    void customSetup() {
-        EndLevelLayer::customSetup();
-        addOverlayMenu(this, this, menu_selector(RouteFinderEndLevelLayer::openBot));
-    }
-    void openBot(CCObject*) { rf::showMenu(nullptr, this); }
-};
-
 // Keep game calls on the game thread. Restarts run after update has unwound,
 // never from destroyPlayer, collision handling or processCommands itself.
 class $modify(RouteFinderPlayLayer, PlayLayer) {
@@ -106,6 +98,7 @@ class $modify(RouteFinderGameLayer, GJBaseGameLayer) {
             rf::attachHud(current);
         }
         if (!runtime.owns(this)) { GJBaseGameLayer::update(dt); return; }
+        runtime.startRenderFrame();
         runtime.service();
         if (runtime.frozen() && runtime.levelReady()) return;
         if (!runtime.active()) { GJBaseGameLayer::update(dt); return; }

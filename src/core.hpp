@@ -13,7 +13,7 @@
 namespace rf {
 using Tick = std::uint64_t;
 inline constexpr Tick MaxTicks = 240 * 1800;
-inline constexpr char ModVersion[] = "1.9.0";
+inline constexpr char ModVersion[] = "1.10.0";
 
 struct Action {
     Tick tick = 0;
@@ -86,6 +86,7 @@ public:
         Tick deathTick = 0;
         double percent = 0;
         bool flight = false;
+        std::uint64_t policy=0,trials=0,routeKey=0;
     };
     Search(std::uint64_t seed, Tick window,bool independent=false);
     void observe(std::vector<Action> const& actions, Tick deathTick, double percent, bool flight = false);
@@ -99,6 +100,7 @@ public:
     Tick window() const { return m_window; }
     void preferTiming(int direction);
     void preferPlayer(int player);
+    void preferFailure(int player,Tick actionTick,int direction,bool duration);
     nlohmann::json snapshot() const;
     static Search restore(nlohmann::json const& value);
 private:

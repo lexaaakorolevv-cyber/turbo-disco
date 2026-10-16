@@ -13,7 +13,9 @@ Runtime& Runtime::get() { static Runtime runtime; return runtime; }
 void Runtime::bind(PlayLayer* layer) {
     if (!layer || m_layer == layer) return;
     if (m_layer && m_layer != layer) unbind(m_layer);
-    m_layer = layer;
+    ++m_saveEpoch;
+    m_layer = layer;m_environment={};m_recordPercent=0;m_recordKey.clear();
+    if(layer->m_level){m_recordKey=fmt::format("record-{}-{}",static_cast<int>(layer->m_level->m_levelID),sha256(std::string(layer->m_level->m_levelString)).toString().substr(0,16));m_recordPercent=Mod::get()->getSavedValue<double>(m_recordKey,0.);if(!std::isfinite(m_recordPercent)||m_recordPercent<0||m_recordPercent>100)m_recordPercent=0;}
     m_best.reset();
     m_selected.reset();
     m_selectedForSearch = false;
@@ -28,7 +30,7 @@ void Runtime::bind(PlayLayer* layer) {
     m_trial = {};
     m_calibration = {}; m_secondCalibration = {}; m_failures = {}; m_motion.reset(); m_forecast = {};m_secondForecast={};
     m_guidanceNote.clear(); m_lastFailure.clear();
-    m_showPreview=Mod::get()->getSettingValue<bool>("show-preview");
+    m_showPreview=false;
     m_smoothSearch=Mod::get()->getSettingValue<bool>("smooth-search");
     m_status = "Готов. Solo, dual и независимый 2-player.";
     log::info("Route Finder {} attached to active level", ModVersion);
@@ -142,6 +144,7 @@ nlohmann::json Runtime::environment() const {
 bool Runtime::prepare() {
     if (active()) { m_status = "Сначала остановите текущую операцию"; return false; }
     if (m_layer && m_search && (m_autosaveDirty || m_autosaveUrgent)) autosaveSearch(true);
+    m_saveWorker.drain();++m_saveEpoch;
     if (!syncActiveLayer()) return false;
     auto error = unsupported();
     if (!error.empty()) { m_status = error; return false; }
@@ -154,7 +157,7 @@ bool Runtime::prepare() {
     m_seed = mod->getSettingValue<int64_t>("search-seed");
     m_inputPacer.reset(SearchCps);m_inputPacer2.reset(SearchCps);
     m_calibration = {}; m_secondCalibration = {}; m_failures = {}; m_motion.reset(); m_forecast = {};
-    m_showPreview = mod->getSettingValue<bool>("show-preview");
+    m_showPreview = false;
     m_smoothSearch = mod->getSettingValue<bool>("smooth-search");
     m_guidanceNote.clear(); m_lastFailure.clear();
     m_started = std::chrono::steady_clock::now();
@@ -248,7 +251,7 @@ void Runtime::inject(bool down,int player) {
     m_layer->handleButton(down,1,nativeButtonSide(player,twoPlayerEnabled(),GameManager::get()->getGameVariable("0010")));
     m_injecting = false;
     (player==2?m_held2:m_held) = down;
-    ++m_inputEdges;
+    if(player==2)++m_inputEdges2;else {++m_inputEdges;if(!twoPlayerEnabled())++m_inputEdges2;}
     appendAction(m_trial.actions, m_tick, down,player);
 }
 
@@ -288,7 +291,8 @@ void Runtime::beginAttempt() {
     m_inputPacer.reset(m_inputPacer.limit());m_inputPacer2.reset(m_inputPacer.limit());
     m_flightObstacles.clear();
     m_motion.reset(); m_calibration.resetSampling();m_secondCalibration.resetSampling(); m_forecast = {};m_secondForecast={};
-    m_observationTime = m_observationTime2=-1; m_robotTime=m_robotTime2=0;m_previousDual=false; m_inputEdges = 0;
+    m_history.reset();m_history2.reset();
+    m_observationTime = m_observationTime2=-1; m_robotTime=m_robotTime2=0;m_previousDual=false; m_inputEdges = m_inputEdges2=0;
     m_guidanceClock.reset();m_secondGuidanceClock.reset();m_inputCommitment.reset();m_secondCommitment.reset();m_cachedDesired=false;rebuildSceneCache();
     m_trialPercent = 0;
     m_accumulator = 0;
@@ -310,6 +314,7 @@ Macro Runtime::snapshot(bool complete) const {
 }
 void Runtime::remember(Macro const& macro) {
     if (!macro.ticks) return;
+    if(macro.bestPercent>m_recordPercent){m_recordPercent=macro.bestPercent;if(!m_recordKey.empty())Mod::get()->setSavedValue<double>(m_recordKey,m_recordPercent);}
     if (!m_best || (macro.completed && !m_best->completed) || macro.bestPercent > m_best->bestPercent + 1e-6 ||
         (std::abs(macro.bestPercent - m_best->bestPercent) <= 1e-6 && macro.ticks > m_best->ticks))
     {
@@ -320,13 +325,14 @@ void Runtime::remember(Macro const& macro) {
 }
 
 std::filesystem::path Runtime::macroPath(bool best) const {
-    auto e = environment();
+    auto e = m_environment.empty()?environment():m_environment;
     auto id = e["level"]["id"].get<int>();
     auto hash = e["level"]["data_sha256"].get<std::string>().substr(0, 16);
     return Mod::get()->getSaveDir() / "macros" /
         fmt::format("{}_{}{}.json", id, hash, best ? ".best" : "");
 }
 void Runtime::writeBest() {
+    m_saveWorker.drain();
     if (!m_best || !m_best->ticks) return;
     auto draft = *m_best;
     draft.verified = false;
@@ -487,6 +493,7 @@ void Runtime::died(GameObject* object,PlayerObject* deadPlayer) {
         if(twoPlayerEnabled())m_search->preferPlayer(deadPlayer==m_layer->m_player2?2:1);
         auto timing = m_failures.timingBias(m_observation);
         m_search->preferTiming(timing > 0 ? -1 : timing < 0 ? 1 : 0);
+        m_search->preferFailure(twoPlayerEnabled()&&deadPlayer==m_layer->m_player2?2:1,m_diagnosis.actionTick,m_diagnosis.timingDirection,m_diagnosis.duration);
         m_plan = m_search->next(m_tickLimit);
         m_flightFrom = m_search->guidanceFrom();
         m_restart = true;
@@ -529,6 +536,7 @@ bool Runtime::completed() {
     m_restart = false;
     m_releasePending = true;
     try {
+        m_saveWorker.drain();
         saveMacro(macroPath(false), verified);
         std::error_code ec;
         std::filesystem::remove(sessionPath(), ec);
@@ -558,6 +566,7 @@ void Runtime::save() {
     } catch (std::exception const& e) { m_status = fmt::format("Ошибка записи: {}", e.what()); }
 }
 void Runtime::load() {
+    m_saveWorker.drain();
     if (active()) { m_status = "Остановите операцию перед загрузкой"; return; }
     if (!syncActiveLayer()) return;
     try {

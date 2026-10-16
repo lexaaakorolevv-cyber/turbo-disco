@@ -50,17 +50,18 @@ void dualRoad(Form second,bool inverted,double direction){
  }
  check(presses>0&&presses<12,"Dual road produced excessive presses");
 }
-void independentRoad(bool inverted,double direction){
+void independentRoad(bool inverted,double direction,bool bounded=false){
  FormState a;a.floor=91;a.ceiling=451;a.y=inverted?437:105;a.inverted=inverted;a.vx=direction*5.2;a.gravity=.958199;
  auto b=a;b.floor=491;b.ceiling=851;b.y=inverted?837:505;
  std::vector<Obstacle> objects{{160,184,91,119},{310,334,491,519},{100,230,545,590},{250,400,145,190}};
  if(inverted)for(auto&o:objects){double sum=o.bottom>400?1342:542;double low=sum-o.top;o.top=sum-o.bottom;o.bottom=low;}
  if(direction<0)for(auto&o:objects){double left=-o.right;o.right=-o.left;o.left=left;}
- auto initialA=a,initialB=b;InputPacer first,second;InputCommitment pa,pb;std::vector<Action> events;bool ha=false,hb=false;unsigned split=0,presses=0;
+ auto initialA=a,initialB=b;PlanningBudget budget;InputPacer first,second;InputCommitment pa,pb;std::vector<Action> events;bool ha=false,hb=false;unsigned split=0,presses=0;
  for(Tick tick=0;tick<400;tick++){
+  if(tick%4==0)budget.reset(6000);
   a.pressRemaining=first.pressRemainingFrames(tick)/4.;b.pressRemaining=second.pressRemainingFrames(tick)/4.;bool da=false,db=false;
   bool va=pa.sample(tick/4.,a,0,da,&b),vb=pb.sample(tick/4.,b,0,db,&a);
-  if(!va||!vb){auto decision=chooseDualInput(a,b,objects,{}, {},nullptr,false,true);da=decision.down;db=decision.secondDown;pa.begin(decision.plan,tick/4.,a,0,&b);pb.begin(decision.secondPlan,tick/4.,b,0,&a);}
+  if(!va||!vb){auto decision=chooseDualInput(a,b,objects,{}, {},nullptr,false,true,bounded?&budget:nullptr);da=decision.down;db=decision.secondDown;pa.begin(decision.plan,tick/4.,a,0,&b);pb.begin(decision.secondPlan,tick/4.,b,0,&a);}
   bool down=first.apply(da,tick),other=second.apply(db,tick);split+=down!=other;presses+=down&&!ha;presses+=other&&!hb;
   if(down!=ha)appendAction(events,tick,down,1);if(other!=hb)appendAction(events,tick,other,2);ha=down;hb=other;
   check(first.currentCps()<=16&&second.currentCps()<=16,"Independent channel exceeded CPS limit");
@@ -135,6 +136,6 @@ int main(){try{
  Search emptySecond(1337,120,true);emptySecond.observe({},100,10);auto resumedEmpty=Search::restore(emptySecond.snapshot());bool exploredP2=false;
  for(int i=0;i<128;i++){auto next=emptySecond.next(500);check(next==resumedEmpty.next(500),"Empty P2 channel resume diverged");exploredP2|=std::any_of(next.begin(),next.end(),[](auto const&a){return a.player==2;});}
  check(exploredP2,"Search never explored a previously unused second channel");
- int roads=0;for(bool inv:{false,true})for(double d:{1.,-1.}){cubeRoad(inv,d);++roads;independentRoad(inv,d);++roads;for(auto form:{Form::Cube,Form::Ball}){dualRoad(form,inv,d);++roads;}}
+ int roads=0;for(bool inv:{false,true})for(double d:{1.,-1.}){cubeRoad(inv,d);++roads;independentRoad(inv,d);++roads;independentRoad(inv,d,true);++roads;for(auto form:{Form::Cube,Form::Ball}){dualRoad(form,inv,d);++roads;}}
  std::cout<<roads<<" ordinary, shared-dual and independent-player oracle roads; no idle spam, pad impulses, orb rearming, native portal handoff and two-player desync detection: PASS\n";
 }catch(std::exception const&e){std::cerr<<e.what()<<'\n';return 1;}}

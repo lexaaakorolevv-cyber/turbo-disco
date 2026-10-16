@@ -71,3 +71,9 @@ Shared-dual использует реальный `m_gameState.m_isDualMode`, `m
 В закреплённом `GeometryDash.bro` реальная сигнатура — `GJBaseGameLayer::handleButton(bool down,int button,bool isPlayer1)` (win 0x2338e0). Для независимого управления логический P1 преобразуется в true, P2 — в false, с учётом `GameManager::getGameVariable("0010")` (Flip 2-Player Controls). Для solo/shared-dual используется прежний общий false-канал, второй искусственный ввод не добавляется. Физический ввод при записи проходит обратное преобразование и округление к ближайшей следующей native границе processCommands.
 
 Каждый канал имеет собственный held/pending/pacer/короткий план. Сброс и STOP по-прежнему освобождают оба PlayerObject и native очереди. При replay все события текущего тика потребляются циклом, сохраняя порядок P1/P2. Никакие методы прямого изменения физики игрока не добавлены.
+
+## Интерфейс и потоки 1.10.0
+
+Используются существующие `PauseLayer::customSetup`, `CCLabelTTF`, `Mod::getSavedValue<double>/setSavedValue<double>`, `sha256`. В игровом HUD два текстовых узла (значение и тень), без CCMenu/CCDrawNode. Хук кнопки на EndLevelLayer удалён. Открытие BOT ограничено PauseLayer; игровая симуляция не получает новых кнопок HUD.
+
+Для обучения/разбора смертей читаются прежние native координаты, скорость, форма и getObjectRect; новые методы физики не придуманы. P1/P2 имеют отдельные счётчики input edges и историю до 120 наблюдений. Планирование ограничивается локальными числовыми бюджетами. Фоновый работник использует C++ std::thread/mutex/condition_variable и только копии portable структур, JSON и filesystem; вызовов GD/Geode на нём нет.

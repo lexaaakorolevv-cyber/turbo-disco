@@ -1,5 +1,7 @@
 #pragma once
 #include "core.hpp"
+#include "save_worker.hpp"
+#include "death_analysis.hpp"
 #include "flight.hpp"
 #include "input.hpp"
 #include "ground.hpp"
@@ -36,15 +38,12 @@ public:
     bool searching() const {return m_mode==Mode::Searching||m_mode==Mode::Assisting;}
     unsigned cps() const {return std::max(m_inputPacer.currentCps(),twoPlayerEnabled()?m_inputPacer2.currentCps():0);}
     bool smoothSearch() const {return m_smoothSearch;}
-    bool previewEnabled() const {return m_showPreview;}
-    double bestPercent() const {return std::max(m_trialPercent,m_best?m_best->bestPercent:0.);}
+    double bestPercent() const {return std::max({m_recordPercent,m_trialPercent,m_best?m_best->bestPercent:0.});}
     std::uint64_t attempts() const {return m_attempts;}
     char const* modeName() const;
     int remainingSeconds() const {return active()?static_cast<int>(std::max(0.,m_budget.maxSeconds-elapsedSeconds())):0;}
     std::string detail() const {return m_status+(m_autosaveStatus.empty()?"":"\n"+m_autosaveStatus);}
     bool assisting() const { return m_mode == Mode::Assisting; }
-    void togglePreview() { m_showPreview = !m_showPreview;geode::Mod::get()->setSettingValue<bool>("show-preview",m_showPreview); }
-    bool showPreview() const { return m_showPreview && m_mode == Mode::Searching; }
     Forecast const& forecast() const { return m_forecast; }
     Forecast const& secondForecast() const { return m_secondForecast; }
     bool twoPlayerEnabled() const {return m_layer&&m_layer->m_levelSettings&&m_layer->m_levelSettings->m_twoPlayerMode;}
@@ -55,6 +54,7 @@ public:
     void save();
     void load();
     void poll();
+    void startRenderFrame(){m_planningBudget.reset(m_smoothSearch?6000:12000,m_smoothSearch?3.:6.);}
     void service(); // Called only outside the game's update/reset stack.
     bool beforeTick(float dt, bool halfTick, bool lastTick);
     bool advanceOuterUpdate();
@@ -75,7 +75,8 @@ private:
     bool m_pendingHuman2=false,m_held2=false,m_searchDesired2=false;
     bool m_oldCBS = false, m_oldCOS = false, m_haveOptions = false;
     bool m_verifyingSearch = false, m_releasePending = false;
-    double m_accumulator = 0, m_trialPercent = 0;
+    double m_accumulator = 0, m_trialPercent = 0,m_recordPercent=0;
+    std::string m_recordKey;
     Tick m_tick = 0, m_tickLimit = MaxTicks;
     Tick m_outerUpdates = 0, m_outerLimit = 240 * 600;
     std::size_t m_cursor = 0, m_traceCursor = 0;
@@ -84,6 +85,8 @@ private:
     Budget m_budget;
     std::chrono::steady_clock::time_point m_started;
     std::chrono::steady_clock::time_point m_lastAutosave;
+    SearchSaveWorker m_saveWorker;
+    std::uint64_t m_saveEpoch=0;
     bool m_autosaveDirty = false, m_autosaveUrgent = false;
     bool m_selectedForSearch = false;
     std::uint64_t m_previousAttempts = 0;
@@ -103,14 +106,17 @@ private:
     double m_spawnFloor = 90;
     Calibration m_calibration,m_secondCalibration;
     FailureMemory m_failures;
+    PlayerHistory m_history,m_history2;
+    DeathDiagnosis m_diagnosis;
     MotionTracker m_motion;
     FormState m_observation,m_secondObservation;
     Forecast m_forecast,m_secondForecast;
     std::vector<Interaction> m_interactions,m_secondInteractions;
-    std::uint64_t m_inputEdges = 0;
+    std::uint64_t m_inputEdges = 0,m_inputEdges2=0;
     double m_robotTime = 0, m_observationTime = -1,m_robotTime2=0,m_observationTime2=-1;
     bool m_previousDual=false;
     bool m_showPreview = true,m_smoothSearch=true,m_cachedDesired=false;
+    PlanningBudget m_planningBudget;
     GuidanceClock m_guidanceClock,m_secondGuidanceClock;
     std::vector<geode::Ref<GameObject>> m_obstacleObjects,m_interactionObjects;
     unsigned m_sceneObjectCount=0;

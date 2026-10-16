@@ -45,7 +45,7 @@ nlohmann::json Search::snapshot() const {
     for (auto const& e : m_elites) {
         actionCount += e.actions.size();
         check(actionCount <= 4 * MaxTicks,"Search session action budget exceeded; best macro remains usable");
-        result["elites"].push_back({{"actions",compactPlan(e.actions)},{"death",e.deathTick},{"percent",e.percent},{"flight",e.flight}});
+        result["elites"].push_back({{"actions",compactPlan(e.actions)},{"death",e.deathTick},{"percent",e.percent},{"flight",e.flight},{"policy",e.policy},{"trials",e.trials},{"route_key",e.routeKey}});
     }
     for (auto const& e : m_focusEdits) result["edits"].push_back({e.first,e.last,e.delta,e.release});
     std::vector<std::uint64_t> issued(m_issued.begin(),m_issued.end());
@@ -86,7 +86,8 @@ Search Search::restore(nlohmann::json const& v) {
         check(std::isfinite(percent) && percent>=0 && percent<=100 && percent<=previous,"Invalid archive progress/order");
         auto actions=expandPlan(e.at("actions"),death); actionCount+=actions.size();
         check(actionCount<=4*MaxTicks,"Session action budget exceeded");
-        s.m_elites.push_back({std::move(actions),death,percent,e.at("flight").get<bool>()}); previous=percent;
+        auto policy=e.contains("policy")?integer(e.at("policy")):0;check(policy<99,"Invalid elite policy");auto trials=e.contains("trials")?counter(e.at("trials")):0;auto route=e.contains("route_key")?integer(e.at("route_key")):0;
+        s.m_elites.push_back({std::move(actions),death,percent,e.at("flight").get<bool>(),policy,trials,route}); previous=percent;
     }
     auto const& issued=v.at("issued"); check(issued.is_array() && issued.size()<=8192,"Invalid duplicate cache");
     for (auto const& h : issued) s.m_issued.insert(integer(h));

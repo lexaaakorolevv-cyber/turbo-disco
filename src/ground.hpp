@@ -1,4 +1,5 @@
 #pragma once
+#include "planning_budget.hpp"
 #include "geometry.hpp"
 #include <span>
 
@@ -16,5 +17,5 @@ struct GroundDecision {
     double passiveSurvival = 0, jumpDelay = -1;
 };
 GroundDecision chooseGroundInput(GroundObservation const& state, std::span<Obstacle const> objects,
-    double timingBias = 0, Forecast* forecast = nullptr);
+    double timingBias = 0, Forecast* forecast = nullptr,PlanningBudget* budget=nullptr);
 }

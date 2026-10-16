@@ -107,6 +107,7 @@ FormState Runtime::readState(PlayerObject* p) const {
     FormState s;
     s.form=p->m_isShip?Form::Ship:p->m_isDart?Form::Wave:p->m_isBird?Form::Ufo:p->m_isBall?Form::Ball:
         p->m_isRobot?Form::Robot:p->m_isSpider?Form::Spider:p->m_isSwing?Form::Swing:Form::Cube;
+    s.player=twoPlayerEnabled()?(p==m_layer->m_player2?2:1):0;
     s.x=p->getPositionX();s.y=p->getPositionY();s.vy=p->m_yVelocity;
     s.vx=std::abs(p->getCurrentXVelocity())*(p->m_isGoingLeft?-1:1);
     auto rect=p->getObjectRect();s.halfWidth=std::clamp(static_cast<double>(rect.size.width)/2,2.,50.);
@@ -129,12 +130,12 @@ void Runtime::updateIntelligence(PlayerObject* p){
         if(previous>=0&&now>previous){if(state.form==Form::Robot&&!state.grounded&&state.held&&state.vy*(state.inverted?-1:1)>0)robot+=now-previous;
             else if(state.grounded)robot=0;else if(!state.held)robot=16;}
         previous=now;state.robotTime=robot;
-        calibration.observe({state,now,m_inputEdges,player->m_isDashing||player->m_touchedRing||player->m_touchedGravityPortal||player->m_isOnSlope});
-        observation=state;
+        calibration.observe({state,now,player==m_layer->m_player2?m_inputEdges2:m_inputEdges,player->m_isDashing||player->m_touchedRing||player->m_touchedGravityPortal||player->m_isOnSlope});
+        observation=state;(player==m_layer->m_player2?m_history2:m_history).record(state,m_tick,now);
     };
     observe(p,m_calibration,m_observation,m_robotTime,m_observationTime);
     if(dualEnabled()&&m_layer->m_player2)observe(m_layer->m_player2,m_secondCalibration,m_secondObservation,m_robotTime2,m_observationTime2);
-    else {m_secondCalibration.resetSampling();m_observationTime2=-1;m_robotTime2=0;}
+    else {m_secondCalibration.resetSampling();m_observationTime2=-1;m_robotTime2=0;m_history2.reset();}
 }
 void Runtime::collectInteractions(PlayerObject* player,double minX,double maxX,double minY,double maxY){
     m_interactions.clear();bool complex=false;
@@ -222,9 +223,10 @@ void Runtime::guideFlight(PlayerObject* player){
     bool committed=m_inputCommitment.sample(m_outerUpdates/4.,m_observation,contact,pendingFirst,dualEnabled()?&m_secondObservation:nullptr);
     if(twoPlayerEnabled()&&dualEnabled())committed=m_secondCommitment.sample(m_outerUpdates/4.,m_secondObservation,contact,pendingSecond,&m_observation)&&committed;
     if(committed){m_searchDesired=pendingFirst;m_searchDesired2=pendingSecond;m_cachedDesired=m_searchDesired;return;}
+    if(!m_planningBudget.available())return;
     bool firstNeeds=m_guidanceClock.needsPlan(m_outerUpdates,m_observation,events,m_inputEdges),secondNeeds=false;
     if(dualEnabled())secondNeeds=m_secondGuidanceClock.needsPlan(m_outerUpdates,m_secondObservation,
-        m_layer->m_player2->m_ringRelatedSet.size()*16ULL+m_layer->m_player2->m_touchedRing,m_inputEdges);
+        m_layer->m_player2->m_ringRelatedSet.size()*16ULL+m_layer->m_player2->m_touchedRing,m_inputEdges2);
     if(m_smoothSearch&&!firstNeeds&&!secondNeeds){
         m_searchDesired=m_cachedDesired;return;
     }
@@ -240,7 +242,8 @@ void Runtime::guideFlight(PlayerObject* player){
     if(dualEnabled()){
         auto firstInteractions=m_interactions;
         collectInteractions(m_layer->m_player2,minX,maxX,second.y-450,second.y+450);m_secondInteractions=std::move(m_interactions);m_interactions=std::move(firstInteractions);
-        auto decision=chooseDualInput(s,second,m_flightObstacles,m_interactions,m_secondInteractions,&m_failures,m_showPreview,twoPlayerEnabled());
+        auto decision=chooseDualInput(s,second,m_flightObstacles,m_interactions,m_secondInteractions,&m_failures,false,twoPlayerEnabled(),&m_planningBudget);
+        if(!decision.plan.steps)return;
         m_inputCommitment.begin(decision.plan,m_outerUpdates/4.,m_observation,contact,&m_secondObservation);
         m_searchDesired=decision.down;m_searchDesired2=decision.secondDown;
         if(twoPlayerEnabled())m_secondCommitment.begin(decision.secondPlan,m_outerUpdates/4.,m_secondObservation,contact,&m_observation);
@@ -252,21 +255,22 @@ void Runtime::guideFlight(PlayerObject* player){
     bool interactive=std::any_of(m_interactions.begin(),m_interactions.end(),[&](auto const&i){return std::abs((i.area.left+i.area.right)/2-s.x)<std::abs(s.vx)*42+s.halfWidth;});
     bool ramps=std::any_of(m_flightObstacles.begin(),m_flightObstacles.end(),[](auto const&o){return o.ramp;});
     if(interactive||ramps||(s.form!=Form::Cube&&s.form!=Form::Ship&&s.form!=Form::Wave)){
-        auto decision=chooseFormInput(s,m_flightObstacles,m_interactions,&m_failures,(static_cast<int>(policy%7)-3)*.07,m_showPreview);
+        auto decision=chooseFormInput(s,m_flightObstacles,m_interactions,&m_failures,(static_cast<int>(policy%7)-3)*.07,false,&m_planningBudget);
+        if(!decision.plan.steps)return;
         m_inputCommitment.begin(decision.plan,m_outerUpdates/4.,m_observation,contact);
         m_searchDesired=decision.down;if(m_showPreview)m_forecast=std::move(decision.forecast);
     }else if(s.form==Form::Cube){
         GroundObservation g{s.x,s.y,s.vy,s.vx,s.halfWidth,s.halfHeight,player->m_isUpsideDown?1e6:m_spawnFloor,
             s.jump*(s.scale<.9?.8:1),s.gravity*s.gravityMod,m_inputPacer.remainingFrames(m_outerUpdates)/4.,s.grounded,s.inverted,s.held,s.pressInterval,s.pressRemaining};
         static constexpr double timing[]{0,-.25,.25,-.5,.5,-1,1,-1.5,1.5,-2,2};
-        m_searchDesired=chooseGroundInput(g,m_flightObstacles,timing[policy%11]+m_failures.timingBias(s),m_showPreview?&m_forecast:nullptr).down;
+        m_searchDesired=chooseGroundInput(g,m_flightObstacles,timing[policy%11]+m_failures.timingBias(s),nullptr,&m_planningBudget).down;
     }else{
         FlightObservation f;f.mode=s.form==Form::Wave?FlightMode::Wave:FlightMode::Ship;
         f.x=s.x;f.y=s.y;f.vy=s.vy;f.vx=s.vx;f.halfWidth=s.halfWidth;f.halfHeight=s.halfHeight;
         f.bottom=s.floor;f.top=s.ceiling;f.scale=s.scale;f.gravity=s.gravityMod;f.inverted=s.inverted;f.held=s.held;
         f.pressInterval=s.pressInterval;f.pressRemaining=s.pressRemaining;f.accelerationScales=s.acceleration;f.slopeScale=s.waveSlope;
         auto tuning=flightTuning(policy+1,m_seed);tuning.heightBias+=m_failures.heightBias(s);
-        m_searchDesired=chooseFlightInput(f,m_flightObstacles,tuning,m_showPreview?&m_forecast:nullptr,&m_failures);
+        m_searchDesired=chooseFlightInput(f,m_flightObstacles,tuning,nullptr,&m_failures,&m_planningBudget);
     }
     // Unsupported scripted/dash rings still activate only through ordinary
     // native input. Try an alternative policy; never call ringJump directly.
@@ -282,11 +286,12 @@ void Runtime::rememberFailure(GameObject* object,PlayerObject* deadPlayer){
     auto s=readState(deadPlayer?deadPlayer:m_layer->m_player1);m_observation=s;
     FailureRecord f;f.form=s.form;f.x=s.x;f.y=s.y;f.vy=s.vy;f.held=s.held;f.inverted=s.inverted;f.mini=s.scale<.9;
     f.object=object?static_cast<std::uint64_t>(object->m_objectID):0;
-    if(s.form==Form::Cube||s.form==Form::Robot)f.kind=s.grounded||s.vy*(s.inverted?-1:1)>=0?FailureKind::LatePress:FailureKind::EarlyPress;
-    else if(s.form==Form::Ship||s.form==Form::Wave||s.form==Form::Ufo){
-        double hazardY=object?object->getObjectRect().getMidY():(s.y<(s.floor+s.ceiling)/2?s.floor:s.ceiling);
-        bool needUp=s.y>hazardY,down=needUp!=s.inverted;f.kind=down?FailureKind::NeedHold:FailureKind::NeedRelease;
-    }else f.kind=FailureKind::WrongRoute;
+    std::optional<Obstacle> hazard;
+    if(object){auto r=object->getObjectRect();hazard=Obstacle{r.getMinX(),r.getMaxX(),r.getMinY(),r.getMaxY()};}
+    else if(s.y-s.halfHeight<s.floor+8)hazard=Obstacle{s.x-30,s.x+30,s.floor-30,s.floor};
+    else if(s.y+s.halfHeight>s.ceiling-8)hazard=Obstacle{s.x-30,s.x+30,s.ceiling,s.ceiling+30};
+    auto const&history=deadPlayer==m_layer->m_player2?m_history2:m_history;
+    m_diagnosis=diagnoseDeath(s,history,hazard,m_tick);f.kind=m_diagnosis.kind;f.player=s.player;
     m_failures.record(f);m_lastFailure=failureName(f.kind);m_status="Поиск: "+m_lastFailure;
 }
 void Runtime::takeControl(){

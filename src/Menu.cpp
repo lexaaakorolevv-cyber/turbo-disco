@@ -44,7 +44,8 @@ class Menu final:public Popup {
  std::array<std::vector<CCMenuItemSpriteExtra*>,3> m_buttons;
  std::vector<CCNode*> m_botNodes;
  std::array<CCMenuItemSpriteExtra*,3> m_tabs{};
- CCLabelTTF *m_info=nullptr,*m_best=nullptr,*m_attempts=nullptr,*m_time=nullptr,*m_pathCaption=nullptr,*m_smoothCaption=nullptr,*m_helpCaption=nullptr;
+ CCLabelTTF* m_learning=nullptr;
+ CCLabelTTF *m_info=nullptr,*m_best=nullptr,*m_attempts=nullptr,*m_time=nullptr,*m_smoothCaption=nullptr,*m_helpCaption=nullptr;
  float m_elapsed=1;int m_currentPage=0;
  CCLabelTTF* caption(CCMenuItemSpriteExtra*b){return static_cast<CCLabelTTF*>(b->getNormalImage()->getChildren()->objectAtIndex(1));}
  CCMenuItemSpriteExtra* add(char const* text,int page,CCPoint pos,SEL_MenuHandler action,float width=200,float height=36,ccColor4F color=Card){
@@ -69,7 +70,7 @@ class Menu final:public Popup {
   m_helpCaption=caption(add("Ручная помощь",0,{334,83},menu_selector(Menu::help)));
   add("Записать вручную",1,{126,175},menu_selector(Menu::record));add("Загрузить макрос",1,{334,175},menu_selector(Menu::loadMacro));
   add("Сохранить макрос",1,{126,122},menu_selector(Menu::saveMacro));add("Воспроизвести",1,{334,122},menu_selector(Menu::playMacro));
-  m_pathCaption=caption(add("",2,{230,180},menu_selector(Menu::path),412,34));
+  auto learning=label("Калибровка физики · связки · альтернативные маршруты",10);learning->setPosition({230,180});m_mainLayer->addChild(learning);m_buttons[2].reserve(2);m_learning=learning;
   m_smoothCaption=caption(add("",2,{230,135},menu_selector(Menu::smooth),412,34));
   add("Лимиты поиска",2,{230,90},menu_selector(Menu::limits),412,34);
   auto status=tile(412,46,Card);status->setPosition({24,16});m_mainLayer->addChild(status);
@@ -80,63 +81,44 @@ class Menu final:public Popup {
   auto&r=Runtime::get();r.poll();m_elapsed+=dt;if(m_elapsed<.1f)return;m_elapsed=0;
   setText(m_attempts,fmt::format("{}",r.attempts()));setText(m_best,fmt::format("{:.1f}%",r.bestPercent()));
   setText(m_time,r.active()?fmt::format("{}:{:02}",r.remainingSeconds()/60,r.remainingSeconds()%60):"—");
-  setText(m_pathCaption,r.previewEnabled()?"Траектория: показывать":"Траектория: скрыть");
   setText(m_smoothCaption,r.smoothSearch()?"Нагрузка: ниже":"Нагрузка: обычная");
   setText(m_helpCaption,r.assisting()?"Вернуть управление боту":"Ручная помощь");
-  setText(m_info,r.status()+(r.twoPlayerEnabled()?"\n2-player: отдельные кнопки P1 и P2, 16 CPS на игрока":r.dualEnabled()?"\nDual: общая кнопка для обоих игроков":""));
+  setText(m_info,r.detail()+(r.twoPlayerEnabled()?"\n2-player: отдельные кнопки P1 и P2, 16 CPS на игрока":r.dualEnabled()?"\nDual: общая кнопка для обоих игроков":""));
   m_info->setScale(std::min(1.f,36.f/std::max(1.f,m_info->getContentSize().height)));
  }
  void pages(int page){m_currentPage=page;
   for(int i=0;i<3;i++){for(auto b:m_buttons[i]){b->setVisible(page==i);b->setEnabled(page==i);}
    auto bg=static_cast<CCDrawNode*>(m_tabs[i]->getNormalImage()->getChildren()->objectAtIndex(0));bg->clear();roundRect(bg,0,0,130,28,7,page==i?Blue:Card);caption(m_tabs[i])->setColor(page==i?ccColor3B{255,255,255}:Text);}
+  if(m_learning)m_learning->setVisible(page==2);
   for(auto n:m_botNodes)n->setVisible(page==0);m_elapsed=1;
  }
  void onClose(CCObject*s)override{Runtime::get().setMenuOpen(false);Popup::onClose(s);}
  void continueRun(){if(!Runtime::get().active())return;Runtime::get().resumeOverlay(m_pause.data(),m_end.data());onClose(nullptr);}
  void close(CCObject*s){onClose(s);}void botTab(CCObject*){pages(0);}void macroTab(CCObject*){pages(1);}void settingsTab(CCObject*){pages(2);}
  void help(CCObject*){auto&r=Runtime::get();if(r.assisting())r.returnToBot();else r.takeControl();continueRun();}
- void path(CCObject*){Runtime::get().togglePreview();m_elapsed=1;}void smooth(CCObject*){Runtime::get().toggleSmooth();m_elapsed=1;}
+ void smooth(CCObject*){Runtime::get().toggleSmooth();m_elapsed=1;}
  void limits(CCObject*){geode::openSettingsPopup(Mod::get());}
  void search(CCObject*){Runtime::get().startSearch();continueRun();}void stopSearch(CCObject*){Runtime::get().stop();m_elapsed=1;}
  void saveMacro(CCObject*){Runtime::get().save();m_elapsed=1;}void loadMacro(CCObject*){Runtime::get().load();m_elapsed=1;}
  void playMacro(CCObject*){Runtime::get().play();continueRun();}void record(CCObject*){Runtime::get().startRecording();continueRun();}
 public:static Menu* create(PauseLayer*p,EndLevelLayer*e){auto r=new Menu;if(r->initMenu(p,e)){r->autorelease();return r;}delete r;return nullptr;}
 };
+// No menus, buttons, paths or panels are created during gameplay.
 class Hud final:public CCNode {
- CCMenu* m_menu=nullptr;CCMenuItemSpriteExtra *m_open=nullptr,*m_stop=nullptr,*m_help=nullptr;
- CCLabelTTF* m_status=nullptr;CCNode* m_plate=nullptr;CCDrawNode* m_draw=nullptr;
- CCSize m_viewport;float m_textTime=1,m_pathTime=1;bool m_hadPath=false;std::string m_lastMode;
- void open(CCObject*){showMenu();}void stop(CCObject*){Runtime::get().stop();}
- void help(CCObject*){auto&r=Runtime::get();if(r.assisting())r.returnToBot();else r.takeControl();}
+ CCLabelTTF *m_value=nullptr,*m_shadow=nullptr;float m_elapsed=1;CCSize m_viewport;
  void update(float dt)override{
-  auto&r=Runtime::get();r.poll();auto size=CCDirector::sharedDirector()->getWinSize();bool resize=size.width!=m_viewport.width||size.height!=m_viewport.height;
-  if(resize){m_viewport=size;setContentSize(size);m_menu->setContentSize(size);m_open->setPosition({size.width-166,size.height-58});m_stop->setPosition({size.width-112,size.height-58});m_help->setPosition({size.width-58,size.height-58});m_plate->setPosition({size.width-212,size.height-98});float w=190;m_plate->setContentSize({w,54});
-   auto bg=static_cast<CCDrawNode*>(m_plate->getChildren()->objectAtIndex(0));bg->clear();roundRect(bg,0,0,w,54,7,{1,1,1,.94f});m_textTime=1;}
-  m_textTime+=dt;m_pathTime+=dt;auto mode=r.modeName();
-  if(m_textTime>=.1f||mode!=m_lastMode){m_textTime=0;m_lastMode=mode;setText(m_status,fmt::format("{}{}\n#{}  ·  {:.1f}%{}",mode,r.twoPlayerEnabled()?"  ·  2P":r.dualEnabled()?"  ·  dual":"",r.attempts(),r.bestPercent(),r.searching()?fmt::format("  ·  {}/16",r.cps()):""));m_status->setScale(std::min(1.f,172.f/std::max(1.f,m_status->getContentSize().width)));}
-  bool visible=r.showPreview()&&!r.frozen();auto layer=r.layer();
-  if(!visible||!layer||!layer->m_player1||!layer->m_player1->getParent()){if(m_hadPath){m_draw->clear();m_hadPath=false;}return;}
-  if(m_pathTime<1.f/30&&!resize)return;m_pathTime=0;m_draw->clear();m_hadPath=true;
-  auto local=worldToNodeTransform();
-  auto draw=[&](PlayerObject* p,Forecast const&trace,ccColor4F color){if(!p||!p->getParent())return;auto world=p->getParent()->nodeToWorldTransform();
-    auto screen=[&](Point q){return CCPointApplyAffineTransform(CCPointApplyAffineTransform({static_cast<float>(q.x),static_cast<float>(q.y)},world),local);};
-    for(std::size_t i=1;i<trace.path.size()&&i<160;i++)m_draw->drawSegment(screen(trace.path[i-1]),screen(trace.path[i]),.7f,color);
-    if(trace.collision)m_draw->drawDot(screen(*trace.collision),2.6f,Coral);
-  };
-  draw(layer->m_player1,r.forecast(),{.2f,.45f,1,.8f});if(r.dualEnabled())draw(layer->m_player2,r.secondForecast(),{.9f,.25f,.55f,.8f});
+  m_elapsed+=dt;if(m_elapsed<.2f)return;m_elapsed=0;
+  auto size=CCDirector::sharedDirector()->getWinSize();
+  if(size.width!=m_viewport.width||size.height!=m_viewport.height){m_viewport=size;setPosition({size.width-24,size.height-54});}
+  auto text=fmt::format("{:.2f}%",Runtime::get().bestPercent());setText(m_value,text);setText(m_shadow,text);
  }
 public:static Hud* create(){
- auto h=new Hud;if(!h->init()){delete h;return nullptr;}h->autorelease();h->setAnchorPoint({0,0});h->setPosition({0,0});
- h->m_menu=CCMenu::create();h->m_menu->ignoreAnchorPointForPosition(false);h->m_menu->setAnchorPoint({0,0});h->m_menu->setPosition({0,0});h->addChild(h->m_menu);
- h->m_open=control(h,menu_selector(Hud::open),"BOT",48,24,Card,Mint);h->m_menu->addChild(h->m_open);
- h->m_stop=control(h,menu_selector(Hud::stop),"STOP",48,24,Card,Coral);h->m_menu->addChild(h->m_stop);
- h->m_help=control(h,menu_selector(Hud::help),"HELP",48,24,Card,Blue);h->m_menu->addChild(h->m_help);
- float width=190;h->m_plate=tile(width,54,{1,1,1,.94f});h->addChild(h->m_plate,-1);
- h->m_status=label("",8);h->m_status->setAnchorPoint({.5f,.5f});h->m_status->setPosition({95,13});h->m_plate->addChild(h->m_status);
- h->m_draw=CCDrawNode::create();h->addChild(h->m_draw,-2);h->scheduleUpdate();h->update(0);return h;
+ auto h=new Hud;if(!h->init()){delete h;return nullptr;}h->autorelease();
+ h->m_shadow=label("0.00%",14);h->m_shadow->setColor({0,0,0});h->m_shadow->setOpacity(180);h->m_shadow->setAnchorPoint({1,.5f});h->m_shadow->setPosition({1,-1});h->addChild(h->m_shadow);
+ h->m_value=label("0.00%",14);h->m_value->setColor({255,255,255});h->m_value->setAnchorPoint({1,.5f});h->addChild(h->m_value);
+ h->scheduleUpdate();h->update(0);return h;
  }
-};
-}
-void showMenu(PauseLayer*p,EndLevelLayer*e){Runtime::get().syncActiveLayer();if(!Runtime::get().frozen())if(auto m=Menu::create(p,e))m->show();}
+};}
+void showMenu(PauseLayer*p,EndLevelLayer*e){if(!p)return;Runtime::get().syncActiveLayer();if(!Runtime::get().frozen())if(auto m=Menu::create(p,e))m->show();}
 void attachHud(PlayLayer*l){auto p=l->m_uiLayer;if(!p||p->getChildByID("routefinder-hud"))return;if(auto h=Hud::create()){h->setID("routefinder-hud");p->addChild(h,10000);}}
 }
