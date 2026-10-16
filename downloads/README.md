@@ -1,7 +1,9 @@
-# Route Finder 1.11.1 — Windows x64
+# Route Finder 1.12.0 — Windows x64
 
-[Download](local.routefinder-windows-x64-v1.11.1.geode?raw=true)
+[Скачать .geode](local.routefinder-windows-x64-v1.12.0.geode?raw=true)
 
-Test build: invalidate stale guidance after pad/orb impulses and contacts. Replace the previous package, restart and begin a new search. GD 2.2081 / Geode 5.11.1.
+GD 2.2081 / Geode 5.11.1. Замените старый пакет, перезапустите игру и начните новый поиск. Все кнопки: пауза → BOT; в уровне только лучший процент. Лимит 16 CPS на канал сохранён.
 
-Windows 1.11.1: CI https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38925142271; source 999331346fbfe216637beef31ddcf79735d3d4ee. All 12 suites, SDK build and PE x64 passed. Package 375676 bytes; SHA-256 cf5b4438275f2fab25054d99462432f2ed928ac843571c5de7ad1edb9c906542. Actual GD gameplay/FPS unavailable.
+Улучшены калибровка, прогноз приземления и поиск альтернатив у тупиков. Исправлены раздельные P1/P2 правки. Автоматические контрольные точки требуют двух одинаковых повторов: после застоя бот повторяет участок с начала и ищет продолжение после точки. Мгновенного переноса назад нет; при расхождении состояния точка отключается. Пройденный макрос по-прежнему проверяется полным повтором с начала.
+
+Windows x64 **1.12.0**: [CI run](https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38956056935), исходники `25c380444e3f5a4ff4b61fa41327ef2402b2aec6`. Все 13 наборов тестов под MSVC, сборка Geode SDK 5.11.1 / GD 2.2081, упаковка и PE x64 прошли. Архив CI сверен с digest GitHub; пакет — с внутренним SHA256SUMS. Размер .geode: 388932 байт; SHA-256: `621f3b7fa41c6a47b700c7c99c7e4ce1709f74977c2d88295eb992468a7c4ac8`. Настоящая игра, UI и FPS здесь не проверены.

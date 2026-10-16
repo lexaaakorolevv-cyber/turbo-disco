@@ -1,2 +1,2 @@
-cf5b4438275f2fab25054d99462432f2ed928ac843571c5de7ad1edb9c906542  local.routefinder-windows-x64-v1.11.1.geode
-cf5b4438275f2fab25054d99462432f2ed928ac843571c5de7ad1edb9c906542  local.routefinder-windows-x64.geode
+621f3b7fa41c6a47b700c7c99c7e4ce1709f74977c2d88295eb992468a7c4ac8  local.routefinder-windows-x64-v1.12.0.geode
+621f3b7fa41c6a47b700c7c99c7e4ce1709f74977c2d88295eb992468a7c4ac8  local.routefinder-windows-x64.geode
