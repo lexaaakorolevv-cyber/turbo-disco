@@ -144,6 +144,8 @@ double formCost(FormState const& s,FormState const& before,bool down,double dt,d
 }
 bool equivalentFormStates(FormState const&a,FormState const&b){
     return a.form==b.form&&a.inverted==b.inverted&&a.held==b.held&&a.grounded==b.grounded&&
+        std::abs(a.scale-b.scale)<1e-6&&std::abs(a.vx-b.vx)<1e-6&&std::abs(a.gravityMod-b.gravityMod)<1e-6&&
+        std::abs(a.halfWidth-b.halfWidth)<.1&&std::abs(a.halfHeight-b.halfHeight)<.1&&
         a.ringArmed==b.ringArmed&&a.boundary==b.boundary&&std::abs(a.x-b.x)<1.5&&
         std::abs(a.y-b.y)<2&&std::abs(a.vy-b.vy)<.5&&std::abs(a.pressRemaining-b.pressRemaining)<.5&&
         (a.form!=Form::Robot||std::abs(a.robotTime-b.robotTime)<.5);
@@ -185,9 +187,17 @@ static FormDecision planFormInput(FormState const&initial,std::span<Obstacle con
         }
         for(auto const&n:next){if(both&&counts[n.first]>=static_cast<int>(capacity/2))continue;bool duplicate=std::any_of(beam.begin(),beam.end(),[&](auto const&b){return n.first==b.first&&n.used==b.used&&equivalentFormStates(n.s,b.s);});
             if(!duplicate){beam.push_back(n);++counts[n.first];}if(beam.size()==capacity)break;}
-        if(chain)std::stable_sort(beam.begin(),beam.end(),[](auto const&a,auto const&b){return a.cost<b.cost;});
+        // Ball/spider flips keep balanced quotas; their opposite-surface
+        // routes must not be displaced by spare states from one control.
+        if(initial.form!=Form::Ball&&initial.form!=Form::Spider&&beam.size()<capacity)for(auto const&n:next){
+            bool duplicate=std::any_of(beam.begin(),beam.end(),[&](auto const&b){return n.first==b.first&&n.used==b.used&&equivalentFormStates(n.s,b.s);});
+            if(!duplicate)beam.push_back(n);if(beam.size()==capacity)break;
+        }
+        std::stable_sort(beam.begin(),beam.end(),[](auto const&a,auto const&b){return a.cost<b.cost;});
         time+=dt;result.down=beam.front().first;result.survival=time;bestTrace=beam.front().trace;result.plan={beam.front().inputs,static_cast<unsigned>(std::min(depth+1,12)),std::min(time,3.)};
         if(beam.front().s.boundary){result.handoff=true;break;}
+        if(depth+1==depthLimit&&depthLimit<80&&!beam.front().s.grounded&&
+            (beam.front().s.form==Form::Cube||beam.front().s.form==Form::Robot))depthLimit=80;
     }
 planningFinished:
     if(includeForecast)for(int i=bestTrace;i>=0;i=tree[i].parent)result.forecast.path.push_back(tree[i].p);

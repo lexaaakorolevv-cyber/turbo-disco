@@ -9,7 +9,7 @@ std::size_t Calibration::key(FormState const&s){return static_cast<int>(s.form)*
 void Calibration::observe(PhysicsSample const& current){
     auto previous=m_previous;if(previous&&current.time<=previous->time)return;m_previous=current;if(!previous)return;
     auto const&a=previous->state;auto const&b=current.state;double dt=current.time-previous->time;
-    if(dt<.01||dt>1||current.disturbed||previous->disturbed||a.form!=b.form||std::abs(a.scale-b.scale)>.001||
+    if(dt<.01||dt>1||current.disturbed||previous->disturbed||a.padContact||b.padContact||a.form!=b.form||std::abs(a.scale-b.scale)>.001||
         std::abs(a.gravityMod-b.gravityMod)>.001||std::abs(a.vx-b.vx)>.1||
         std::abs(b.x-a.x-a.vx*dt)>std::max(3.,std::abs(a.vx*dt)*.6)){m_robotBoostSeen=false;return;}
     auto update=[&](int slot,double measured,double expected){
@@ -38,7 +38,11 @@ void Calibration::observe(PhysicsSample const& current){
         if(a.form==Form::Ship){bool falling=a.vy*sign<0;int slot=(a.held?0:2)+(falling?1:0);double factor=a.scale<.9?.85:1;
             double base=a.held?(falling?.4791:.3833):-(falling?.3066:.4599);
             if(std::abs(a.vy)<6&&std::abs(b.vy)<6&&falling==(b.vy*sign<0))update(slot,acc,base*a.gravityMod/factor);
-        }else if(a.form==Form::Ufo)update(4,acc,-g*(a.vy*sign<0?.4:.6)/(a.scale<.9?.85:1));
+        }else if(a.form==Form::Ufo){
+            double factor=a.scale<.9?.85:1,va=a.vy*sign,vb=b.vy*sign;
+            if((va<0)==(vb<0)&&va>-6.4/factor+.25&&vb>-6.4/factor+.25&&va<8/factor-.25&&vb<8/factor-.25)
+                update(4,acc,-g*(va<0?.4:.6)/factor);
+        }
         else if(a.form==Form::Swing){if(std::abs(a.vy)<6&&std::abs(b.vy)<6)update(4,acc,-g*(a.scale<.9?.6:.4));}
         else if(a.form==Form::Robot&&a.held){
             if(a.vy*sign>1&&std::abs(acc)<g*.15)m_robotBoostSeen=true;

@@ -16,6 +16,23 @@ std::uint64_t integer(json const& v) {
 std::uint64_t counter(json const& v) {
     auto n = integer(v); check(n <= 1000000000000ULL, "Session counter out of range"); return n;
 }
+json checkpointSample(Sample const&s){
+    json second=nullptr;if(s.second){auto const&p=*s.second;second={p.x,p.y,p.vy,p.speed,p.size,p.flags};}
+    return {s.tick,s.x,s.y,s.vy,s.speed,s.size,s.dt,s.flags,second};
+}
+Sample readCheckpointSample(json const&v){
+    check(v.is_array()&&v.size()==9,"Invalid checkpoint sample");
+    Sample s; s.tick=integer(v[0]);check(s.tick>0&&s.tick<MaxTicks,"Invalid checkpoint tick");
+    auto number=[](json const&v){check(v.is_number(),"Invalid checkpoint number");double n=v.get<double>();check(std::isfinite(n)&&std::abs(n)<1e9,"Invalid checkpoint value");return n;};
+    s.x=number(v[1]);s.y=number(v[2]);s.vy=number(v[3]);s.speed=number(v[4]);s.size=number(v[5]);s.dt=number(v[6]);
+    auto flags=integer(v[7]);check(flags<8192&&s.dt>0&&s.dt<=1&&s.size>0,"Invalid checkpoint physics");s.flags=static_cast<std::uint32_t>(flags);
+    if(!v[8].is_null()){
+        auto const&p=v[8];check(p.is_array()&&p.size()==6,"Invalid checkpoint player 2");auto f=integer(p[5]);check(f<4096,"Invalid checkpoint player 2 flags");
+        s.second=PlayerSample{number(p[0]),number(p[1]),number(p[2]),number(p[3]),number(p[4]),static_cast<std::uint32_t>(f)};
+        check(s.second->size>0,"Invalid checkpoint player 2 size");
+    }
+    check(bool(s.flags&(1u<<12))==s.second.has_value(),"Checkpoint dual state mismatch");return s;
+}
 }
 nlohmann::json compactPlan(std::vector<Action> const& actions) {
     auto result = nlohmann::json::array();
@@ -48,6 +65,13 @@ nlohmann::json Search::snapshot() const {
         result["elites"].push_back({{"actions",compactPlan(e.actions)},{"death",e.deathTick},{"percent",e.percent},{"flight",e.flight},{"policy",e.policy},{"trials",e.trials},{"route_key",e.routeKey}});
     }
     for (auto const& e : m_focusEdits) result["edits"].push_back({e.first,e.last,e.delta,e.release});
+    result["checkpoints"]=json::array();
+    for(auto const&c:m_checkpoints){
+        actionCount+=c.actions.size();check(actionCount<=4*MaxTicks,"Checkpoint action budget exceeded");
+        result["checkpoints"].push_back({{"percent",c.percent},{"actions",compactPlan(c.actions)},{"state",checkpointSample(c.state)},
+            {"confirmations",c.confirmations},{"attempt",c.attempt}});
+    }
+    result["rollback_tick"]=m_rollbackState?json(m_rollbackState->tick):json(nullptr);
     std::vector<std::uint64_t> issued(m_issued.begin(),m_issued.end());
     std::sort(issued.begin(),issued.end()); result["issued"] = issued;
     return result;
@@ -88,6 +112,21 @@ Search Search::restore(nlohmann::json const& v) {
         check(actionCount<=4*MaxTicks,"Session action budget exceeded");
         auto policy=e.contains("policy")?integer(e.at("policy")):0;check(policy<99,"Invalid elite policy");auto trials=e.contains("trials")?counter(e.at("trials")):0;auto route=e.contains("route_key")?integer(e.at("route_key")):0;
         s.m_elites.push_back({std::move(actions),death,percent,e.at("flight").get<bool>(),policy,trials,route}); previous=percent;
+    }
+    if(v.contains("checkpoints")){
+        auto const&points=v.at("checkpoints");check(points.is_array()&&points.size()<=CheckpointPercents.size(),"Invalid checkpoint count");
+        for(auto const&c:points){
+            auto percent=integer(c.at("percent"));check(std::find(CheckpointPercents.begin(),CheckpointPercents.end(),percent)!=CheckpointPercents.end(),"Invalid checkpoint percent");
+            check(std::none_of(s.m_checkpoints.begin(),s.m_checkpoints.end(),[&](auto const&p){return p.percent==static_cast<int>(percent);}),"Duplicate checkpoint");
+            auto state=readCheckpointSample(c.at("state"));auto actions=expandPlan(c.at("actions"),state.tick);
+            actionCount+=actions.size();check(actionCount<=4*MaxTicks,"Checkpoint action budget exceeded");
+            auto confirmations=integer(c.at("confirmations")),attempt=counter(c.at("attempt"));check(confirmations>=1&&confirmations<=2&&attempt>0,"Invalid checkpoint confirmation");
+            s.m_checkpoints.push_back({static_cast<int>(percent),std::move(actions),state,static_cast<unsigned>(confirmations),attempt});
+        }
+    }
+    if(v.contains("rollback_tick")&&!v.at("rollback_tick").is_null()){
+        auto tick=integer(v.at("rollback_tick"));auto found=std::find_if(s.m_checkpoints.begin(),s.m_checkpoints.end(),[&](auto const&c){return c.confirmations>=2&&c.state.tick==tick;});
+        check(found!=s.m_checkpoints.end()&&tick==s.m_guidanceFrom,"Invalid rollback checkpoint");s.m_rollbackState=found->state;
     }
     auto const& issued=v.at("issued"); check(issued.is_array() && issued.size()<=8192,"Invalid duplicate cache");
     for (auto const& h : issued) s.m_issued.insert(integer(h));

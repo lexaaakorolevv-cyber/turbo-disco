@@ -20,6 +20,7 @@ struct FormState {
     int player=0;
     double planningHorizon=42; // Optional structural map, native 60 Hz units.
     std::optional<double> routeTarget;
+    bool padContact=false;
 };
 struct PhysicsSample {
     FormState state;

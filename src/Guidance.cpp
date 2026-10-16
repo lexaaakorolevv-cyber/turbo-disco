@@ -107,7 +107,7 @@ FormState Runtime::readState(PlayerObject* p) const {
     FormState s;
     s.form=p->m_isShip?Form::Ship:p->m_isDart?Form::Wave:p->m_isBird?Form::Ufo:p->m_isBall?Form::Ball:
         p->m_isRobot?Form::Robot:p->m_isSpider?Form::Spider:p->m_isSwing?Form::Swing:Form::Cube;
-    s.player=twoPlayerEnabled()?(p==m_layer->m_player2?2:1):0;
+    s.player=twoPlayerEnabled()?(p==m_layer->m_player2?2:1):0;s.padContact=p->m_touchedPad;
     s.x=p->getPositionX();s.y=p->getPositionY();s.vy=p->m_yVelocity;
     s.vx=std::abs(p->getCurrentXVelocity())*(p->m_isGoingLeft?-1:1);
     auto rect=p->getObjectRect();s.halfWidth=std::clamp(static_cast<double>(rect.size.width)/2,2.,50.);

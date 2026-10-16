@@ -312,10 +312,23 @@ bool Search::issue(std::vector<Action> const& actions) {
     return m_issued.insert(hash).second;
 }
 std::vector<Action> Search::next(Tick limit) {
+    m_rollbackState.reset();
     m_guidanceFrom = 0;
     m_phase = SearchPhase::Guided;
     if (!limit) return {};
     if (m_elites.empty()) { m_policy = 0; m_generation = 1; return {}; }
+    // These are replay-prefix checkpoints, never saved world states. A new
+    // attempt still starts at tick zero and checks its endpoint natively.
+    if(m_stale>=4&&(m_choices+1)%4==0){
+        std::vector<Checkpoint const*> available;
+        for(auto const&c:m_checkpoints)if(c.confirmations>=2&&c.state.tick<limit&&c.state.tick<m_elites.front().deathTick&&c.percent<m_elites.front().percent)available.push_back(&c);
+        std::sort(available.begin(),available.end(),[](auto a,auto b){return a->percent>b->percent;});
+        if(!available.empty()){
+            auto c=available[std::min<std::size_t>((m_stale-4)/16,available.size()-1)];
+            m_guidanceFrom=c->state.tick;m_policy=(m_policy+17+(m_generation++%7))%99;
+            if(issue(c->actions)){++m_choices;m_rollbackState=c->state;m_phase=SearchPhase::Explore;return c->actions;}
+        }
+    }
     if (m_stale >= 128 && (m_choices + 1) % 32 == 0) {
         ++m_choices; ++m_escapeCount;
         m_policy = (m_rng() + m_escapeCount * 29) % 99;
@@ -338,14 +351,19 @@ std::vector<Action> Search::next(Tick limit) {
             if (issue(result)) { m_phase = SearchPhase::Timing; return result; }
             continue;
         }
-        auto first = static_cast<std::int64_t>(m_focusBase[edit.first].tick) + edit.delta;
-        auto last = static_cast<std::int64_t>(m_focusBase[edit.last].tick) + edit.delta;
-        auto low = edit.first ? m_focusBase[edit.first - 1].tick + 1 : 0;
-        auto high = edit.last + 1 < m_focusBase.size() ? m_focusBase[edit.last + 1].tick - 1 : limit - 1;
-        if (first < static_cast<std::int64_t>(low) || last > static_cast<std::int64_t>(high)) continue;
-        auto result = m_focusBase;
-        for (auto i = edit.first; i <= edit.last; ++i)
-            result[i].tick = static_cast<Tick>(static_cast<std::int64_t>(result[i].tick) + edit.delta);
+        auto channel=m_focusBase[edit.first].player;
+        auto firstIndex=edit.first,lastIndex=edit.last;
+        while(lastIndex>firstIndex&&m_focusBase[lastIndex].player!=channel)--lastIndex;
+        auto first=static_cast<std::int64_t>(m_focusBase[firstIndex].tick)+edit.delta;
+        auto last=static_cast<std::int64_t>(m_focusBase[lastIndex].tick)+edit.delta;
+        Tick low=0,high=limit-1;
+        for(auto i=firstIndex;i-->0;)if(m_focusBase[i].player==channel){low=m_focusBase[i].tick+1;break;}
+        for(auto i=lastIndex+1;i<m_focusBase.size();++i)if(m_focusBase[i].player==channel){high=m_focusBase[i].tick-1;break;}
+        if(first<static_cast<std::int64_t>(low)||last>static_cast<std::int64_t>(high))continue;
+        auto result=m_focusBase;
+        for(auto i=firstIndex;i<=lastIndex;++i)if(result[i].player==channel)
+            result[i].tick=static_cast<Tick>(static_cast<std::int64_t>(result[i].tick)+edit.delta);
+        std::stable_sort(result.begin(),result.end(),[](auto const&a,auto const&b){return a.tick<b.tick||(a.tick==b.tick&&a.player<b.player);});
         m_policy = m_focusPolicy;
         m_guidanceFrom = std::min(limit, std::max(m_focusDeath + 1, result.back().tick + 1));
         if (issue(result)) { m_phase = SearchPhase::Timing; return result; }

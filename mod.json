@@ -6,7 +6,7 @@
     },
     "id": "local.routefinder",
     "name": "Route Finder",
-    "version": "v1.11.1",
+    "version": "v1.12.0",
     "developer": "Route Finder contributors",
     "description": "Analyze level structure and corridors, then search solo/two-player routes; pause-only controls and verified physics-tick macros.",
     "settings": {

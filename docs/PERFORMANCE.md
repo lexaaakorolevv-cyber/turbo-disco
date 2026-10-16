@@ -1,3 +1,9 @@
+# Engine 1.12.0
+
+No gameplay HUD/UI changes. Main flight beam stays 64; near a predicted dead end (<8 native units) one bounded diverse rescue may run. Generic beam capacity remains 64/128 rescue, with compatible spare slots filled. An airborne cube/robot forecast may extend from 42 to at most 66 native units to inspect landing. No render deadline truncates decisions. Extra planning can cost CPU; no real-game FPS guarantee is made.
+
+Up to 12 replay checkpoints store copied numeric endpoints/actions; confirmation is on native attempts, not forecasts. Native milestone sampling reuses the existing 16-tick trace boundary. Rollback replays from tick zero; no full-world snapshots or fast-forward are claimed. Checkpoints are included in the existing bounded session/background-save action budget. Large snapshot copies remain on the main thread.
+
 # Analyze 1.11.0
 
 Снимок ограничен 250000 объектами, native-чтение — 512 за UI-кадр/кооперативные 2 мс только при открытом анализаторе. Сортировка, структура, отчёт и JSON выполняются в фоновом потоке над числами. Индекс по X используется только при новом прогнозе; запрос не более 4096 объектов. Граф коридоров — 32 среза и до 128 AABB. При превышении ограничений подсказка отключается, физические шаги и ввод не пропускаются.

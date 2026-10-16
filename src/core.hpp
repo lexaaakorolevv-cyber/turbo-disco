@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <array>
 #include <optional>
 #include <filesystem>
 #include <random>
@@ -13,7 +14,7 @@
 namespace rf {
 using Tick = std::uint64_t;
 inline constexpr Tick MaxTicks = 240 * 1800;
-inline constexpr char ModVersion[] = "1.11.1";
+inline constexpr char ModVersion[] = "1.12.0";
 
 struct Action {
     Tick tick = 0;
@@ -81,6 +82,8 @@ enum class SearchPhase { Guided, Timing, Explore, Restart };
 class Search {
 public:
     static constexpr std::size_t ArchiveLimit = 24;
+    static constexpr std::array<int,12> CheckpointPercents{1,2,5,10,20,30,40,50,60,70,80,90};
+    struct Checkpoint {int percent=0;std::vector<Action> actions;Sample state;unsigned confirmations=1;std::uint64_t attempt=0;};
     struct Elite {
         std::vector<Action> actions;
         Tick deathTick = 0;
@@ -101,6 +104,11 @@ public:
     void preferTiming(int direction);
     void preferPlayer(int player);
     void preferFailure(int player,Tick actionTick,int direction,bool duration);
+    void observeCheckpoint(int percent,std::vector<Action> const& actions,Sample const& state,std::uint64_t attempt);
+    void invalidateCheckpoint(Tick tick);
+    std::optional<Sample> const& rollbackState() const{return m_rollbackState;}
+    int rollbackPercent() const;
+    std::size_t checkpointCount() const;
     nlohmann::json snapshot() const;
     static Search restore(nlohmann::json const& value);
 private:
@@ -120,6 +128,8 @@ private:
     bool issue(std::vector<Action> const& actions);
     std::unordered_set<std::uint64_t> m_issued;
     std::vector<Elite> m_elites;
+    std::vector<Checkpoint> m_checkpoints;
+    std::optional<Sample> m_rollbackState;
 };
 
 struct SearchSessionState {

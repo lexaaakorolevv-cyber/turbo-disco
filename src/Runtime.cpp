@@ -288,6 +288,7 @@ void Runtime::beginAttempt() {
     m_trial.environment = m_environment;
     m_tick = 0;
     m_outerUpdates = 0;
+    m_nextCheckpoint=0;
     m_cursor = 0;
     m_traceCursor = 0;
     m_guidedFlight = false;
@@ -302,6 +303,8 @@ void Runtime::beginAttempt() {
     m_accumulator = 0;
     ++m_attempts;
     m_restart = false;
+    if(m_mode==Mode::Searching&&m_search&&m_search->rollbackState())
+        m_status=fmt::format("Откат к {}%: повтор с начала до контрольной точки",m_search->rollbackPercent());
 }
 
 Macro Runtime::snapshot(bool complete) const {
@@ -433,6 +436,12 @@ bool Runtime::beforeTick(float dt, bool halfTick, bool lastTick) {
             (q->m_isGoingLeft<<9)|(q->m_isSideways<<10)|(q->m_isDashing<<11);
         sample.second=PlayerSample{q->getPositionX(),q->getPositionY(),q->m_yVelocity,q->m_playerSpeed,q->m_vehicleSize,qflags};
     }
+    if(m_mode==Mode::Searching&&m_search&&m_search->rollbackState()&&m_tick==m_search->rollbackState()->tick){
+        if(!sameSample(*m_search->rollbackState(),sample)){
+            m_search->invalidateCheckpoint(m_tick);m_inputCommitment.reset();m_secondCommitment.reset();m_guidanceClock.reset();m_secondGuidanceClock.reset();
+            m_status="Контрольная точка не совпала: отключена, поиск продолжен";
+        }else m_status="Контрольная точка повторена: ищу новый участок";
+    }
     bool expectedSample=m_target&&m_traceCursor<m_target->trace.size()&&m_target->trace[m_traceCursor].tick==m_tick;
     if (m_tick % 16 == 0 || dualEnabled()!=m_previousDual || expectedSample) {
         if (m_target) {
@@ -442,6 +451,13 @@ bool Runtime::beforeTick(float dt, bool halfTick, bool lastTick) {
             ++m_traceCursor;
         }
         m_trial.trace.push_back(sample);
+        if(m_mode==Mode::Searching&&m_search){
+            double progress=std::clamp(static_cast<double>(m_layer->getCurrentPercent()),0.,100.);
+            int reached=0;
+            while(m_nextCheckpoint<Search::CheckpointPercents.size()&&progress>=Search::CheckpointPercents[m_nextCheckpoint])reached=Search::CheckpointPercents[m_nextCheckpoint++];
+            if(reached)m_search->observeCheckpoint(reached,m_trial.actions,sample,m_previousAttempts+m_attempts);
+        }
+
     }
     m_previousDual=dualEnabled();
     m_trial.timings.push_back({dt, halfTick, lastTick});

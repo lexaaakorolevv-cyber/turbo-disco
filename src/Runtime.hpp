@@ -85,6 +85,7 @@ private:
     std::string m_recordKey;
     Tick m_tick = 0, m_tickLimit = MaxTicks;
     Tick m_outerUpdates = 0, m_outerLimit = 240 * 600;
+    unsigned m_nextCheckpoint=0;
     std::size_t m_cursor = 0, m_traceCursor = 0;
     std::uint64_t m_attempts = 0, m_seed = 1337;
     static constexpr std::uint64_t GameSeed = 0x526f75746546696eULL;

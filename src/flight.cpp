@@ -23,7 +23,7 @@ struct Node {
     int trace = 0;
 };
 }
-bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle const> obstacles, FlightTuning tuning, Forecast* forecast, FailureMemory const* failures,PlanningBudget* budget) {
+static bool planFlightInput(FlightObservation const& s, std::span<FlightObstacle const> obstacles, FlightTuning tuning, Forecast* forecast, FailureMemory const* failures,PlanningBudget* budget,bool diverse,double& survival) {
     if (forecast) *forecast = {};
     if (!std::isfinite(s.x) || !std::isfinite(s.y) || !std::isfinite(s.vy) ||
         !std::isfinite(s.vx) || !std::isfinite(s.bottom) || !std::isfinite(s.top) ||
@@ -147,22 +147,52 @@ bool chooseFlightInput(FlightObservation const& s, std::span<FlightObstacle cons
         // Keep diverse height/velocity states so a cheap coasting path cannot
         // crowd all early braking/avoidance candidates out of the beam.
         beam.clear();
-        for (auto const& candidate : next) {
+        auto add=[&](Node const& candidate){
             bool duplicate = std::any_of(beam.begin(), beam.end(), [&](Node const& n) {
                 return n.first == candidate.first && n.held == candidate.held && std::abs(n.y - candidate.y) < 2 &&
                     std::abs(n.vy - candidate.vy) < .4 && std::abs(n.wait - candidate.wait) < .25;
             });
             if (!duplicate) beam.push_back(candidate);
-            if (beam.size() == Width) break;
+        };
+        if(!diverse){for(auto const&candidate:next){add(candidate);if(beam.size()==Width)break;}}
+        else {
+        bool both=std::any_of(next.begin(),next.end(),[](auto const&n){return n.first;})&&std::any_of(next.begin(),next.end(),[](auto const&n){return !n.first;});
+        unsigned counts[2]{};
+        auto region=[&](Node const&n){return std::clamp(static_cast<int>((n.y-low)/std::max(1.,high-low)*4),0,3)+4*(n.vy>=0)+8*n.first;};
+        for(auto const&candidate:next){
+            if(std::none_of(beam.begin(),beam.end(),[&](auto const&n){return region(n)==region(candidate);})){
+                add(candidate);++counts[candidate.first];
+            }
+            if(beam.size()==8)break;
+        }
+        for(auto const& candidate:next){
+            if(both&&counts[candidate.first]>=Width/16)continue;
+            auto before=beam.size();add(candidate);counts[candidate.first]+=beam.size()!=before;
+            if(beam.size()==Width)break;
+        }
+        if(beam.size()<Width)for(auto const& candidate:next){add(candidate);if(beam.size()==Width)break;}
+        std::stable_sort(beam.begin(),beam.end(),[](auto const&a,auto const&b){return a.cost<b.cost;});
         }
         answer = beam.front().first;
         bestTrace = beam.front().trace;
         time += segment;
     }
 planningFinished:
+    survival=time;
     if (forecast) {
         for(int i=bestTrace;i>=0;i=tree[i].parent)forecast->path.push_back(tree[i].point);
         std::reverse(forecast->path.begin(),forecast->path.end());forecast->down=answer;forecast->survival=time;
+    }
+    return answer;
+}
+bool chooseFlightInput(FlightObservation const&s,std::span<FlightObstacle const>objects,FlightTuning tuning,Forecast* forecast,FailureMemory const* failures,PlanningBudget* budget){
+    double survival=0;bool answer=planFlightInput(s,objects,tuning,forecast,failures,budget,false,survival);
+    // Keep the proven main controller; reserve alternative control/height
+    // groups only to rescue a forecast that reaches an imminent dead end.
+    if(survival>0&&survival<8&&(!budget||budget->available())){
+        Forecast alternative;double rescued=0;
+        bool down=planFlightInput(s,objects,tuning,forecast?&alternative:nullptr,failures,budget,true,rescued);
+        if(rescued>survival+1e-8){answer=down;if(forecast)*forecast=std::move(alternative);}
     }
     return answer;
 }
