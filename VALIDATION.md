@@ -8,8 +8,11 @@
 - `routefinder2-analysis`: цепочки/направление/полосы игроков/границы режимов/условные объекты, полный горизонт форм и dual, независимая wave-развилка с дальним тупиком, ограничение плотной карты, отмена и числовой работник.
 - `routefinder2-modes`: переносимые независимые сценарии поддерживаемых форм, взаимодействий и обоих видов dual.
 
-Реальные API адаптера сверены с закреплёнными bindings GD 2.2081 / SDK 5.11.1. Windows CI должен собрать DLL x64, упаковать .geode, выполнить все пять наборов и проверить manifest/PE/хеши до выдачи ссылки.
+Реальные API адаптера сверены с закреплёнными bindings GD 2.2081 / SDK 5.11.1. Windows CI собрал DLL x64, упаковал .geode, выполнил все пять наборов и проверил manifest/PE/хеши.
 
 Geometry Dash в среде сборки не запускается. Игровой процесс, визуальное отображение UI, FPS, сложные скрипты и реальные online-уровни здесь не проверены. Результаты стенда не являются гарантией прохождения произвольного уровня.
 
-Финальные пять наборов локально прошли в Release за 9.98 с. Windows SDK/PE/упаковка ещё проверяются перед публикацией.
+Финальные пять наборов локально прошли в Release за 9.98 с. Windows SDK/PE/упаковка прошли; доказательства ниже.
+
+
+Windows x64 2.0.0: CI https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/39014648548; source 69f193cc79c52ed3e694d83d64ac1e57af8d0dd2. SDK 5.11.1 / GD 2.2081 build, all five suites, package and PE x64 passed. Artifact digest and inner package checksum verified. Package 323083 bytes; SHA-256 0b2a700bc99a4092c3f6795402be487a83b6809d98c195cfe9f0908bbbc94b99. Actual GD gameplay/UI/FPS unavailable.
