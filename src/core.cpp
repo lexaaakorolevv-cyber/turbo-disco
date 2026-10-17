@@ -232,13 +232,29 @@ std::uint64_t routeKey(std::vector<Action> const&actions,Tick death){
 Search::Search(std::uint64_t seed, Tick window,bool independent) : m_rng(seed), m_independent(independent), m_window(std::clamp<Tick>(window, 8, 2400)) {}
 void Search::observe(std::vector<Action> const& actions, Tick death, double percent, bool flight) {
     auto candidate = Elite{prefix(actions, death), death, percent, flight,m_policy,0,routeKey(actions,death)};
+    // Attribute the real outcome to the branch that generated this trial,
+    // even if its tail edits create a new coarse fingerprint. Do this before
+    // duplicate rejection: repeating the same fatal route is still evidence.
+    auto source=m_pendingRoute.value_or(candidate.routeKey);
+    bool refiningAlternative=m_pendingRoute&&!m_elites.empty()&&source!=m_elites.front().routeKey&&source!=routeKey(m_focusBase,m_focusDeath);
+    m_pendingRoute.reset();
+    double anchor=0;std::uint64_t stalls=0;bool known=false;
+    for(auto const&e:m_elites)if(e.routeKey==source){known=true;anchor=std::max(anchor,e.frontier);stalls=std::max(stalls,e.stalls);}
+    if(known){bool improved=percent>=100||percent>anchor+.5;
+        for(auto&e:m_elites)if(e.routeKey==source){e.stalls=improved?0:std::min<std::uint64_t>(stalls+1,1000000000000ULL);if(improved)e.frontier=percent;}
+    }
+    candidate.frontier=percent;bool sameRoute=false;
+    for(auto const&e:m_elites)if(e.routeKey==candidate.routeKey){
+        candidate.trials=std::max(candidate.trials,e.trials);candidate.stalls=std::max(candidate.stalls,e.stalls);
+        candidate.frontier=sameRoute?std::max(candidate.frontier,e.frontier):e.frontier;sameRoute=true;
+    }
     bool improvement = m_elites.empty() || percent > m_elites.front().percent + 1e-6 ||
         (std::abs(percent - m_elites.front().percent) <= 1e-6 && death > m_elites.front().deathTick);
     m_stale = improvement ? 0 : m_stale + 1;
-    if (std::any_of(m_elites.begin(), m_elites.end(), [&](Elite const& e) {
+    bool duplicate=std::any_of(m_elites.begin(), m_elites.end(), [&](Elite const& e) {
         return e.actions == candidate.actions;
-    })) return;
-    if (!candidate.actions.empty() && (improvement ||
+    });
+    if (!candidate.actions.empty() && (improvement || refiningAlternative ||
         (percent + .25 >= m_elites.front().percent && (m_focusEdits.empty() || death > m_focusDeath)))) {
         // A compact queue of edits shares one immutable parent; do not retain
         // dozens of complete long-level macros just to shift a few ticks.
@@ -264,6 +280,7 @@ void Search::observe(std::vector<Action> const& actions, Tick death, double perc
             }
         }
     }
+    if(duplicate)return;
     m_elites.push_back(std::move(candidate));
     std::stable_sort(m_elites.begin(), m_elites.end(), [](Elite const& a, Elite const& b) {
         if (a.percent != b.percent) return a.percent > b.percent;
@@ -324,33 +341,54 @@ void Search::preferFailure(int player,Tick tick,int direction,bool duration){
             std::abs(e.delta)+std::abs(e.tailDelta),duration&&!preferredDuration};};
     std::stable_sort(m_focusEdits.begin(),m_focusEdits.end(),[&](auto const&a,auto const&b){return rank(a)<rank(b);});
 }
-bool Search::issue(std::vector<Action> const& actions) {
+bool Search::issue(std::vector<Action> const& actions,std::optional<std::uint64_t> route) {
     std::uint64_t hash = 1469598103934665603ULL;
     auto mix = [&](std::uint64_t v) { hash = (hash ^ v) * 1099511628211ULL; };
     mix(m_guidanceFrom); mix(m_policy);
     for (auto const& a : actions) { mix(a.tick); mix(a.down); mix(a.player); }
     if (m_issued.size() >= 8192) m_issued.clear();
-    return m_issued.insert(hash).second;
+    if(!m_issued.insert(hash).second)return false;
+    if(route&&std::none_of(m_elites.begin(),m_elites.end(),[&](auto const&e){return e.routeKey==*route;}))route.reset();
+    m_pendingRoute=route;
+    if(route){std::uint64_t visits=0;for(auto const&e:m_elites)if(e.routeKey==*route)visits=std::max(visits,e.trials);
+        for(auto&e:m_elites)if(e.routeKey==*route)e.trials=std::min<std::uint64_t>(visits+1,1000000000000ULL);}
+    return true;
 }
 std::vector<Action> Search::next(Tick limit) {
+    m_pendingRoute.reset();
     m_rollbackState.reset();
     m_guidanceFrom = 0;
     m_phase = SearchPhase::Guided;
     if (!limit) return {};
     if (m_elites.empty()) { m_policy = 0; m_generation = 1; return {}; }
+    auto stuck=std::max(m_stale,routeStalls(m_elites.front().routeKey));
+    // The HUD record is not a search score. A high-percent branch with a
+    // repeated dead end must yield trials to an earlier, distinct branch.
+    if(stuck>=8&&m_choices%(stuck>=16?2:4)==0){
+        if(auto index=alternative(m_elites.front().routeKey)){
+            auto const&parent=m_elites[*index];Tick death=std::min(parent.deathTick,limit);
+            Tick start=death>32?death-32:0;
+            for(auto i=parent.actions.rbegin();i!=parent.actions.rend();++i)if(i->down&&i->tick<death&&death-i->tick<=m_window){start=std::min(start,i->tick>8?i->tick-8:0);break;}
+            auto result=prefix(parent.actions,start);m_guidanceFrom=start;
+            for(unsigned retry=0;retry<8;retry++){
+                m_policy=(parent.policy+17+m_generation++*7)%99;
+                if(issue(result,parent.routeKey)){++m_choices;m_phase=SearchPhase::Explore;return result;}
+            }
+        }
+    }
     // These are replay-prefix checkpoints, never saved world states. A new
     // attempt still starts at tick zero and checks its endpoint natively.
-    if(m_stale>=4&&(m_choices+1)%4==0){
+    if(stuck>=4&&(m_choices+1)%4==0){
         std::vector<Checkpoint const*> available;
         for(auto const&c:m_checkpoints)if(c.confirmations>=2&&c.state.tick<limit&&c.state.tick<m_elites.front().deathTick&&c.percent<m_elites.front().percent)available.push_back(&c);
         std::sort(available.begin(),available.end(),[](auto a,auto b){return a->percent>b->percent;});
         if(!available.empty()){
-            auto c=available[std::min<std::size_t>((m_stale-4)/16,available.size()-1)];
+            auto c=available[std::min<std::size_t>((stuck-4)/8,available.size()-1)];
             m_guidanceFrom=c->state.tick;m_policy=(m_policy+17+(m_generation++%7))%99;
-            if(issue(c->actions)){++m_choices;m_rollbackState=c->state;m_phase=SearchPhase::Explore;return c->actions;}
+            if(issue(c->actions,m_elites.front().routeKey)){++m_choices;m_rollbackState=c->state;m_phase=SearchPhase::Explore;return c->actions;}
         }
     }
-    if (m_stale >= 128 && (m_choices + 1) % 32 == 0) {
+    if (stuck >= 128 && (m_choices + 1) % 32 == 0) {
         ++m_choices; ++m_escapeCount;
         m_policy = (m_rng() + m_escapeCount * 29) % 99;
         m_phase = SearchPhase::Restart;
@@ -369,7 +407,7 @@ std::vector<Action> Search::next(Tick limit) {
             appendAction(result, static_cast<Tick>(tick), false,m_focusBase[edit.first].player);
             m_policy = m_focusPolicy;
             m_guidanceFrom = std::min(limit, m_focusDeath + 1);
-            if (issue(result)) { m_phase = SearchPhase::Timing; return result; }
+            if (issue(result,routeKey(m_focusBase,m_focusDeath))) { m_phase = SearchPhase::Timing; return result; }
             continue;
         }
         auto channel=m_focusBase[edit.first].player;
@@ -388,7 +426,7 @@ std::vector<Action> Search::next(Tick limit) {
         std::stable_sort(result.begin(),result.end(),[](auto const&a,auto const&b){return a.tick<b.tick||(a.tick==b.tick&&a.player<b.player);});
         m_policy = m_focusPolicy;
         m_guidanceFrom = std::min(limit, std::max(m_focusDeath + 1, result.back().tick + 1));
-        if (issue(result)) { m_phase = SearchPhase::Timing; return result; }
+        if (issue(result,routeKey(m_focusBase,m_focusDeath))) { m_phase = SearchPhase::Timing; return result; }
     }
     std::vector<Action> result;
     for (int retry = 0; retry < 64; ++retry) {
@@ -398,7 +436,7 @@ std::vector<Action> Search::next(Tick limit) {
             if(m_stale<8)parentIndex=m_rng()%m_elites.size();
             else for(std::size_t i=1;i<m_elites.size();++i)if((m_stale>=24||m_elites[i].percent+2>=m_elites.front().percent)&&m_elites[i].trials<m_elites[parentIndex].trials)parentIndex=i;
         }
-        ++m_elites[parentIndex].trials;auto const& parent=m_elites[parentIndex];
+        auto const& parent=m_elites[parentIndex];
         bool independent=m_independent||std::any_of(parent.actions.begin(),parent.actions.end(),[](auto const&a){return a.player==2;});
         int control=independent?1+generation%2:1;
         Tick window = std::min<Tick>(m_window * (1 + m_stale / 16), 2400);
@@ -456,7 +494,7 @@ std::vector<Action> Search::next(Tick limit) {
             }
             m_guidanceFrom = result.empty() ? start : result.back().tick + 1;
         }
-        if (issue(result)) break;
+        if (issue(result,parent.routeKey)) break;
     }
     return result;
 }

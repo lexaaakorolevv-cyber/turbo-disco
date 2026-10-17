@@ -200,3 +200,14 @@ The pre-update 1.12.0 core fails the new sustained-regime calibration test and, 
 
 
 Windows x64 **1.13.0**: [CI run](https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/38958387614), исходники `cebe88c374f4d0a02d781751a9dce2620af4a53d`. Все 14 наборов тестов под MSVC, сборка Geode SDK 5.11.1 / GD 2.2081, упаковка и PE x64 прошли. Архив CI сверен с digest GitHub; пакет — с внутренним SHA256SUMS. Размер .geode: 391624 байт; SHA-256: `e07c09107593c41abc57945ef25ae7e2a1aebc46a2dbfdbd0fb6895abbbf0678`. Настоящая игра, UI и FPS здесь не проверены.
+
+
+## 1.14.0 — deceptive frontier and live controller
+
+New fifteenth suite routefinder-routing: four seeds of an independent timing-gate oracle with a fatal 75% fork and repairable 35% fork; selection of the lower branch after eight repeated failures; repair of that branch through the 100% gate; preservation of the 75% record while selecting 35%; exact pending-attribution resume; duplicate failure accounting; meaningful-growth recovery; malformed branch counters/frontier/references; actual shared solo entry forecasting ordinary cube landing in an alternative policy without Analyze. The previous 1.13.0 core fails the same deceptive-frontier test before any repair.
+
+Runtime calls the portable chooseSoloInput entry tested by the suite. The default ground controller is preserved; one quarter of alternative policies can use the form planner without interactions or Analyze. A proposed unconditional replacement was rejected because it reduced cube oracle successes from 68/96 to 55/96 (13 losses, no gains). Optional route_comparison now exercises that same entry; --legacy compares the old ground controller under the oracle's identical geometry/physics observations. These synthetic tests do not prove real GD level completion. Native gameplay/UI/FPS remain unavailable. Windows SDK compilation, package verification and all fifteen suites are required before distribution.
+
+Локальная финальная Release-проверка: все 15 наборов прошли за 22.21 секунды. Дополнительный тест против старой 1.13.0 воспроизводит удержание тупиковой 75%-ветки вместо более ранней альтернативы. Настоящая Geometry Dash недоступна; результаты не являются заявлением о прохождении игровых уровней.
+
+Итоговое A/B-сравнение общего solo-входа с наземным контроллером на тех же 128 независимых дорогах: совпали все исходы, 73 успешных (68 cube, 5 ball), ни одной ранее успешной дороги не потеряно. Это проверка портфеля с политикой 0 и одинаковыми заданными наблюдениями стенда, не запуск Geometry Dash. Полная замена на form-контроллер (60/128) отклонена; альтернативный form-путь доступен только как часть перебора политик/взаимодействий.

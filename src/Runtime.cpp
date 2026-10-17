@@ -305,6 +305,9 @@ void Runtime::beginAttempt() {
     m_restart = false;
     if(m_mode==Mode::Searching&&m_search&&m_search->rollbackState())
         m_status=fmt::format("Откат к {}%: повтор с начала до контрольной точки",m_search->rollbackPercent());
+    else if(m_mode==Mode::Searching&&m_search&&m_search->phase()==SearchPhase::Explore){
+        if(auto branch=m_search->branchPercent())m_status=fmt::format("Пробую ветку {:.2f}% при рекорде {:.2f}%; повтор с начала",*branch,m_best?m_best->bestPercent:0.);
+    }
 }
 
 Macro Runtime::snapshot(bool complete) const {

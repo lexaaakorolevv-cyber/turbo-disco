@@ -62,7 +62,7 @@ nlohmann::json Search::snapshot() const {
     for (auto const& e : m_elites) {
         actionCount += e.actions.size();
         check(actionCount <= 4 * MaxTicks,"Search session action budget exceeded; best macro remains usable");
-        result["elites"].push_back({{"actions",compactPlan(e.actions)},{"death",e.deathTick},{"percent",e.percent},{"flight",e.flight},{"policy",e.policy},{"trials",e.trials},{"route_key",e.routeKey}});
+        result["elites"].push_back({{"actions",compactPlan(e.actions)},{"death",e.deathTick},{"percent",e.percent},{"flight",e.flight},{"policy",e.policy},{"trials",e.trials},{"route_key",e.routeKey},{"stalls",e.stalls},{"frontier",e.frontier}});
     }
     for (auto const& e : m_focusEdits) result["edits"].push_back({e.first,e.last,e.delta,e.release,e.tailDelta});
     result["checkpoints"]=json::array();
@@ -72,6 +72,7 @@ nlohmann::json Search::snapshot() const {
             {"confirmations",c.confirmations},{"attempt",c.attempt}});
     }
     result["rollback_tick"]=m_rollbackState?json(m_rollbackState->tick):json(nullptr);
+    result["pending_route"]=m_pendingRoute?json(*m_pendingRoute):json(nullptr);
     std::vector<std::uint64_t> issued(m_issued.begin(),m_issued.end());
     std::sort(issued.begin(),issued.end()); result["issued"] = issued;
     return result;
@@ -113,7 +114,9 @@ Search Search::restore(nlohmann::json const& v) {
         auto actions=expandPlan(e.at("actions"),death); actionCount+=actions.size();
         check(actionCount<=4*MaxTicks,"Session action budget exceeded");
         auto policy=e.contains("policy")?integer(e.at("policy")):0;check(policy<99,"Invalid elite policy");auto trials=e.contains("trials")?counter(e.at("trials")):0;auto route=e.contains("route_key")?integer(e.at("route_key")):0;
-        s.m_elites.push_back({std::move(actions),death,percent,e.at("flight").get<bool>(),policy,trials,route}); previous=percent;
+        auto stalls=e.contains("stalls")?counter(e.at("stalls")):0;
+        double frontier=e.value("frontier",percent);check(std::isfinite(frontier)&&frontier>=0&&frontier<=100,"Invalid route frontier");
+        s.m_elites.push_back({std::move(actions),death,percent,e.at("flight").get<bool>(),policy,trials,route,stalls,frontier}); previous=percent;
     }
     if(v.contains("checkpoints")){
         auto const&points=v.at("checkpoints");check(points.is_array()&&points.size()<=CheckpointPercents.size(),"Invalid checkpoint count");
@@ -129,6 +132,9 @@ Search Search::restore(nlohmann::json const& v) {
     if(v.contains("rollback_tick")&&!v.at("rollback_tick").is_null()){
         auto tick=integer(v.at("rollback_tick"));auto found=std::find_if(s.m_checkpoints.begin(),s.m_checkpoints.end(),[&](auto const&c){return c.confirmations>=2&&c.state.tick==tick;});
         check(found!=s.m_checkpoints.end()&&tick==s.m_guidanceFrom,"Invalid rollback checkpoint");s.m_rollbackState=found->state;
+    }
+    if(v.contains("pending_route")&&!v.at("pending_route").is_null()){
+        auto route=integer(v.at("pending_route"));check(std::any_of(s.m_elites.begin(),s.m_elites.end(),[&](auto const&e){return e.routeKey==route;}),"Unknown pending route");s.m_pendingRoute=route;
     }
     auto const& issued=v.at("issued"); check(issued.is_array() && issued.size()<=8192,"Invalid duplicate cache");
     for (auto const& h : issued) s.m_issued.insert(integer(h));

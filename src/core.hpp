@@ -14,7 +14,7 @@
 namespace rf {
 using Tick = std::uint64_t;
 inline constexpr Tick MaxTicks = 240 * 1800;
-inline constexpr char ModVersion[] = "1.13.0";
+inline constexpr char ModVersion[] = "1.14.0";
 
 struct Action {
     Tick tick = 0;
@@ -90,6 +90,8 @@ public:
         double percent = 0;
         bool flight = false;
         std::uint64_t policy=0,trials=0,routeKey=0;
+        std::uint64_t stalls=0;
+        double frontier=0;
     };
     Search(std::uint64_t seed, Tick window,bool independent=false);
     void observe(std::vector<Action> const& actions, Tick deathTick, double percent, bool flight = false);
@@ -100,6 +102,7 @@ public:
     std::uint64_t policy() const { return m_policy; }
     SearchPhase phase() const { return m_phase; }
     std::uint64_t staleAttempts() const { return m_stale; }
+    std::optional<double> branchPercent() const;
     Tick window() const { return m_window; }
     void preferTiming(int direction);
     void preferPlayer(int player);
@@ -125,7 +128,10 @@ private:
     std::uint64_t m_focusPolicy = 0, m_choices = 0;
     std::uint64_t m_escapeCount = 0;
     SearchPhase m_phase = SearchPhase::Guided;
-    bool issue(std::vector<Action> const& actions);
+    bool issue(std::vector<Action> const& actions,std::optional<std::uint64_t> route=std::nullopt);
+    std::uint64_t routeStalls(std::uint64_t route) const;
+    std::optional<std::size_t> alternative(std::uint64_t excluded) const;
+    std::optional<std::uint64_t> m_pendingRoute;
     std::unordered_set<std::uint64_t> m_issued;
     std::vector<Elite> m_elites;
     std::vector<Checkpoint> m_checkpoints;
