@@ -12,4 +12,7 @@
 
 Стенды используют переносимый числовой мир, не экземпляр Geometry Dash. Они подтверждают логику ветвления/протокол, но не реальное прохождение уровней.
 
-Реальные API адаптера сверены с закреплёнными bindings GD 2.2081 / SDK 5.11.1. Текущая Windows-сборка и хеши добавляются после CI. Реальные игровой процесс, UI и FPS здесь недоступны.
+Реальные API адаптера сверены с закреплёнными bindings GD 2.2081 / SDK 5.11.1. Windows CI: DLL, пакет и все шесть наборов тестов прошли; хеши проверены. Реальные игровой процесс, UI и FPS здесь недоступны.
+
+<!-- RELEASE-PROOF -->
+Windows x64 2.1.0: CI https://github.com/lexaaakorolevv-cyber/turbo-disco/actions/runs/39016324230; source 9ab40887432f26b65253a0015a2efbeda2987e38. SDK 5.11.1 / GD 2.2081 build, all six suites, package and PE x64 passed. Artifact digest and inner checksum verified. Package 334378 bytes; SHA-256 8158fc3f275dbe6308c26e205ba5dcd9645c45d7fc15c424dd36c579f5fdcea2. Actual GD gameplay/UI/FPS unavailable.
