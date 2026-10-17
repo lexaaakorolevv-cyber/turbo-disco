@@ -25,8 +25,8 @@ CCNode *card(float w, float h, ccColor4F fill) {
         float x = (c == 0 || c == 3) ? w - radius : radius, y = c < 2 ? h - radius : radius;
         for (int i = 0; i < 6; i++) {
             double a = (90 * c + 18 * i) * 3.141592653589793 / 180;
-            p[count++] = {x + radius * static_cast<float>(std::cos(a)),
-                          y + radius * static_cast<float>(std::sin(a))};
+            p[count++] = CCPoint{x + radius * static_cast<float>(std::cos(a)),
+                                 y + radius * static_cast<float>(std::sin(a))};
         }
     }
     d->drawPolygon(p, count, fill, .5f, {.84f, .87f, .92f, 1});

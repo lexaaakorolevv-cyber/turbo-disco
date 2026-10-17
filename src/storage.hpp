@@ -12,7 +12,7 @@ class Storage {
         std::filesystem::path directory;
         Session session;
     };
-    std::mutex m_mutex;
+    mutable std::mutex m_mutex;
     std::condition_variable m_cv;
     std::optional<Job> m_job;
     bool m_exit = false, m_busy = false;
@@ -25,6 +25,6 @@ class Storage {
     ~Storage();
     void submit(std::filesystem::path directory, Session session);
     void drain();
-    std::string error();
+    std::string error() const;
 };
 } // namespace v2

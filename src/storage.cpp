@@ -61,7 +61,7 @@ void Storage::drain() {
     std::unique_lock lock(m_mutex);
     m_cv.wait(lock, [&] { return !m_job && !m_busy; });
 }
-std::string Storage::error() {
+std::string Storage::error() const {
     std::lock_guard lock(m_mutex);
     return m_error;
 }

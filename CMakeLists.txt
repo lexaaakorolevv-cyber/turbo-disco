@@ -13,7 +13,7 @@ add_library(routefinder2 STATIC src/types.cpp src/search.cpp src/brain.cpp src/e
 target_include_directories(routefinder2 PUBLIC src src/physics)
 target_link_libraries(routefinder2 PUBLIC nlohmann_json::nlohmann_json Threads::Threads)
 if(MSVC)
- target_compile_options(routefinder2 PRIVATE /utf-8)
+ target_compile_options(routefinder2 PUBLIC /utf-8)
 endif()
 if(ROUTEFINDER_CORE_ONLY)
  enable_testing()
