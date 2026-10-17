@@ -1,0 +1,10 @@
+{
+    "geode": "5.11.2",
+    "gd": {"win": "2.2081"},
+    "id": "local.cube_learner",
+    "name": "Cube Learner",
+    "version": "v0.2.0",
+    "developer": "Local Tools",
+    "description": "Experimental cube learning bot. Protected sessions; no normal results or rewards.",
+    "resources": {"files": ["resources/bot.fnt", "resources/bot.png", "resources/FONT-LICENSE.txt"]}
+}

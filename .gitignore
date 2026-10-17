@@ -1,0 +1,5 @@
+/build/
+/deps/
+*.geode
+*.tmp
+__pycache__/
