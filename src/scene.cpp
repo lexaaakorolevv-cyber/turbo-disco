@@ -151,7 +151,7 @@ std::optional<rf::Interaction> interaction(GameObject *o, PlayerObject *p, PlayL
         break;
     case GameObjectType::YellowJumpPad:
     case GameObjectType::PinkJumpPad:
-    case GameObjectType::RedPad:
+    case GameObjectType::RedJumpPad:
         i.kind = t == GameObjectType::YellowJumpPad ? rf::InteractionKind::YellowPad
                  : t == GameObjectType::PinkJumpPad ? rf::InteractionKind::PinkPad
                                                     : rf::InteractionKind::RedPad;
