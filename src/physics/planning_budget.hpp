@@ -2,9 +2,9 @@
 #include <chrono>
 #include <cstdint>
 namespace rf {
-// Legacy limited planner for offline regression/benchmark comparisons only.
-// Live Runtime never supplies this: truncation changes decisions and makes
-// search depend on render FPS and machine speed.
+// Native input-tree search bounds heuristic ordering by a fixed node count.
+// Wall-time truncation is reserved for offline comparisons: it would change
+// ordering with machine speed. Live routes are judged by game outcomes.
 class PlanningBudget {
     unsigned m_left = 0, m_used = 0;
     bool m_timed = false, m_started = false;

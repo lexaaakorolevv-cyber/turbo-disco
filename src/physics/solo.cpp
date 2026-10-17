@@ -6,7 +6,7 @@
 namespace rf {
 FormDecision chooseSoloInput(FormState const &s, std::span<Obstacle const> objects,
                              std::span<Interaction const> interactions, FailureMemory const *failures,
-                             std::uint64_t policy, std::uint64_t seed, bool trace) {
+                             std::uint64_t policy, std::uint64_t seed, bool trace, PlanningBudget *budget) {
     bool interactive = std::any_of(interactions.begin(), interactions.end(), [&](auto const &i) {
         return std::abs((i.area.left + i.area.right) / 2 - s.x) <
                std::abs(s.vx) * std::max(42., s.planningHorizon) + s.halfWidth;
@@ -35,7 +35,7 @@ FormDecision chooseSoloInput(FormState const &s, std::span<Obstacle const> objec
         FormDecision result;
         auto decision =
             chooseGroundInput(g, objects, timing[policy % 11] + (failures ? failures->timingBias(s) : 0),
-                              trace ? &result.forecast : nullptr);
+                              trace ? &result.forecast : nullptr, budget);
         result.down = decision.down;
         if (trace)
             result.survival = result.forecast.survival;
@@ -43,7 +43,7 @@ FormDecision chooseSoloInput(FormState const &s, std::span<Obstacle const> objec
     }
     if (interactive || ramps || (s.form != Form::Ship && s.form != Form::Wave)) {
         double bias = s.form == Form::Cube && policy == 0 ? 0 : (static_cast<int>(policy % 7) - 3) * .07;
-        return chooseFormInput(s, objects, interactions, failures, bias, trace);
+        return chooseFormInput(s, objects, interactions, failures, bias, trace, budget);
     }
     FlightObservation f;
     f.mode = s.form == Form::Wave ? FlightMode::Wave : FlightMode::Ship;
@@ -69,7 +69,7 @@ FormDecision chooseSoloInput(FormState const &s, std::span<Obstacle const> objec
     if (failures)
         tuning.heightBias += failures->heightBias(s);
     FormDecision result;
-    result.down = chooseFlightInput(f, objects, tuning, trace ? &result.forecast : nullptr, failures);
+    result.down = chooseFlightInput(f, objects, tuning, trace ? &result.forecast : nullptr, failures, budget);
     return result;
 }
 } // namespace rf

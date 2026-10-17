@@ -1,6 +1,7 @@
 #pragma once
 #include "brain.hpp"
 #include "search.hpp"
+#include "native_search.hpp"
 #include <utility>
 #include <algorithm>
 #include <cmath>
@@ -17,6 +18,7 @@ struct Session {
     Json learning;
     std::uint64_t attempts = 0;
     double seconds = 0;
+    std::optional<NativeSearch> nativeSearch;
 };
 Json encode(Session const &session);
 Session decodeSession(Json const &json);
@@ -29,6 +31,7 @@ class Engine {
     Run m_trial;
     std::optional<Run> m_best, m_target;
     Search m_search;
+    NativeSearch m_nativeSearch;
     Candidate m_candidate;
     Brain m_brain;
     std::array<rf::InputPacer, 2> m_pacer;

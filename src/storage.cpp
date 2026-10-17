@@ -3,7 +3,9 @@
 namespace v2 {
 Json readJson(std::filesystem::path const &p) {
     std::string error = "Файл не найден";
-    for (auto const &file : {p, std::filesystem::path(p.string() + ".bak")})
+    auto backup = p;
+    backup += ".bak";
+    for (auto const &file : {p, backup})
         try {
             if (!std::filesystem::exists(file))
                 continue;
@@ -20,7 +22,9 @@ Json readJson(std::filesystem::path const &p) {
 }
 void writeJson(std::filesystem::path const &p, Json const &j) {
     std::filesystem::create_directories(p.parent_path());
-    auto temp = p.string() + ".new", backup = p.string() + ".bak";
+    auto temp = p, backup = p;
+    temp += ".new";
+    backup += ".bak";
     {
         std::ofstream out(temp, std::ios::binary | std::ios::trunc);
         if (!out)

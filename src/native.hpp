@@ -12,8 +12,8 @@ class Native {
     std::optional<Run> m_loaded;
     std::string m_notice, m_recordKey;
     bool m_injecting = false, m_resetting = false, m_menu = false, m_finish = false, m_options = false,
-         m_cbs = false, m_cos = false;
-    double m_accumulator = 0, m_spawnFloor = 91, m_record = 0, m_baseSeconds = 0;
+         m_cbs = false, m_cos = false, m_savePending = false;
+    double m_accumulator = 0, m_spawnFloor = 91, m_record = 0, m_baseSeconds = 0, m_nextSave = 0;
     std::chrono::steady_clock::time_point m_started;
     Json environment() const;
     std::filesystem::path directory() const;

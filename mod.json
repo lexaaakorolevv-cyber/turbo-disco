@@ -1,15 +1,74 @@
 {
- "geode":"5.11.1",
- "gd":{"win":"2.2081"},
- "id":"local.routefinder",
- "name":"Route Finder 2",
- "version":"v2.0.0",
- "developer":"Route Finder contributors",
- "description":"Modular native-tick recording, verified replay and bounded route search. Controls in pause; best percent only in the level.",
- "settings":{
-  "max-attempts":{"type":"int","name":"Attempt limit (includes full verification)","default":10000,"min":2,"max":100000},
-  "max-seconds":{"type":"int","name":"Total wall time limit (seconds)","default":3600,"min":10,"max":86400},
-  "max-attempt-seconds":{"type":"int","name":"Single attempt duration limit","default":600,"min":10,"max":1800},
-  "auto-resume":{"type":"bool","name":"Resume compatible v2 search session","default":true}
- }
+  "geode": "5.11.1",
+  "gd": {
+    "win": "2.2081"
+  },
+  "id": "local.routefinder",
+  "name": "Route Finder 2",
+  "version": "v2.1.0",
+  "developer": "Route Finder contributors",
+  "description": "Native-physics input branching with full-reset replay, independent P1/P2 search and verified JSON macros.",
+  "settings": {
+    "max-attempts": {
+      "type": "int",
+      "name": "Attempt limit (includes full verification)",
+      "default": 10000,
+      "min": 2,
+      "max": 100000
+    },
+    "max-seconds": {
+      "type": "int",
+      "name": "Total wall time limit (seconds)",
+      "default": 3600,
+      "min": 10,
+      "max": 86400
+    },
+    "max-attempt-seconds": {
+      "type": "int",
+      "name": "Single attempt duration limit",
+      "default": 600,
+      "min": 10,
+      "max": 1800
+    },
+    "auto-resume": {
+      "type": "bool",
+      "name": "Resume compatible v2 search session",
+      "default": true
+    },
+    "native-search": {
+      "type": "bool",
+      "name": "Search using live game outcomes",
+      "description": "Tries input branches in real GD physics. Backtracks by full reset and replay; no partial world snapshots. Disable to use the older approximate repair search.",
+      "default": true
+    },
+    "decision-step": {
+      "type": "int",
+      "name": "Native search decision interval (240 Hz ticks)",
+      "description": "1 is finer but has more branches. A resumed search keeps its saved interval; disable auto-resume to start fresh.",
+      "default": 2,
+      "min": 1,
+      "max": 8
+    },
+    "search-budget-ms": {
+      "type": "int",
+      "name": "Search work budget per rendered frame (ms)",
+      "description": "Limits batches of native search updates. One update or controller forecast cannot be interrupted; this is not a hard FPS guarantee.",
+      "default": 2,
+      "min": 1,
+      "max": 8
+    },
+    "max-decisions": {
+      "type": "int",
+      "name": "Native decision limit",
+      "default": 3000000,
+      "min": 1000,
+      "max": 50000000
+    },
+    "accelerate-search": {
+      "type": "bool",
+      "name": "Accelerate native search (experimental)",
+      "description": "Runs extra fixed game updates per draw within the frame budget. Leave disabled for levels using render-time actions/audio. Every route still needs real-time verification.",
+      "default": false
+    }
+  }
 }

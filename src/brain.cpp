@@ -11,7 +11,7 @@ void Brain::resetAttempt() {
     m_desired = {};
 }
 std::array<bool, 2> Brain::choose(Frame f, std::array<std::uint64_t, 2> edges, std::uint64_t policy,
-                                  SceneProvider const &provider) {
+                                  SceneProvider const &provider, unsigned nodeBudget) {
     double now = f.outer / 4., dt = m_previous < 0 ? 0 : std::max(0., now - m_previous);
     m_previous = now;
     for (int i = 0; i < (f.dual ? 2 : 1); i++) {
@@ -41,16 +41,20 @@ std::array<bool, 2> Brain::choose(Frame f, std::array<std::uint64_t, 2> edges, s
         return m_desired;
     auto s = m_calibration[0].adjusted(f.players[0]);
     auto const &scene = provider(f);
+    rf::PlanningBudget budget;
+    budget.reset(nodeBudget);
+    auto bounded = nodeBudget ? &budget : nullptr;
     if (f.dual) {
         auto secondState = m_calibration[1].adjusted(f.players[1]);
         auto d = rf::chooseDualInput(s, secondState, scene.objects, scene.interactions[0],
-                                     scene.interactions[1], nullptr, false, f.independent);
+                                     scene.interactions[1], nullptr, false, f.independent, bounded);
         m_desired = {d.down, d.secondDown};
         m_commit[0].begin(d.plan, now, f.players[0], contact, &f.players[1]);
         if (f.independent)
             m_commit[1].begin(d.secondPlan, now, f.players[1], contact, &f.players[0]);
     } else {
-        auto d = rf::chooseSoloInput(s, scene.objects, scene.interactions[0], nullptr, policy, 1337, false);
+        auto d = rf::chooseSoloInput(s, scene.objects, scene.interactions[0], nullptr, policy, 1337, false,
+                                     bounded);
         m_desired = {d.down, false};
         if (d.plan.steps)
             m_commit[0].begin(d.plan, now, f.players[0], contact);

@@ -16,6 +16,7 @@ void Engine::configure(Json environment, Limits limits) {
     m_best.reset();
     m_target.reset();
     m_search = {};
+    m_nativeSearch.configure(limits.decisionStep, limits.maxDepth, limits.maxDecisions);
     m_candidate = {};
     m_brain = {};
     m_attempts = 0;
@@ -40,13 +41,17 @@ void Engine::startSearch(Json e, Limits limits, std::optional<Session> resume) {
         m_attempts = resume->attempts;
         m_seconds = resume->seconds;
         m_brain.restoreLearning(resume->learning);
+        if (m_limits.nativeSearch && resume->nativeSearch.has_value())
+            m_nativeSearch = std::move(*resume->nativeSearch);
+        m_nativeSearch.limit(m_limits.maxDecisions);
     } else
         m_candidate = m_search.next();
     if (m_best && m_best->complete) {
         m_target = m_best;
         m_mode = Mode::Verifying;
     }
-    m_status = "Поиск: ветки оцениваются по попыткам, рекорд хранится отдельно";
+    m_status = m_limits.nativeSearch ? "Поиск веток через физику игры; рекорд не выбирает маршрут"
+                                     : "Приближённый поиск: рекорд хранится отдельно";
 }
 void Engine::startRecording(Json e, Limits l) {
     configure(std::move(e), l);
@@ -86,10 +91,14 @@ void Engine::beginAttempt() {
     m_event = Event::None;
     m_restart = false;
     m_brain.resetAttempt();
+    m_nativeSearch.beginAttempt();
     for (auto &p : m_pacer)
         p.reset(16);
     if (m_mode == Mode::Searching) {
-        m_status = "Поиск · попытка " + std::to_string(m_attempts);
+        m_status = (m_limits.nativeSearch ? "Физика игры · попытка " : "Прогноз · попытка ") +
+                   std::to_string(m_attempts);
+        if (m_limits.nativeSearch)
+            m_status += " · решений " + std::to_string(m_nativeSearch.decisions());
         for (auto const &branch : m_search.branches())
             if (branch.id == m_candidate.parent)
                 m_status += " · проверяю ветку " + std::to_string(static_cast<int>(branch.percent)) + "%";
@@ -152,6 +161,12 @@ Decision Engine::tick(Frame f, SceneProvider const &provider) {
             return d;
         }
     }
+    if (m_mode == Mode::Searching && m_limits.nativeSearch &&
+        !m_nativeSearch.validateReplay(f, m_trial.actions.size())) {
+        fail("Расхождение повторяемого префикса на тике " + std::to_string(m_tick) +
+             "; поиск остановлен, эта ветка не признана тупиком");
+        return d;
+    }
     auto sample = f.sample();
     bool expected =
         m_target && m_traceCursor < m_target->trace.size() && m_target->trace[m_traceCursor].tick == m_tick;
@@ -194,8 +209,30 @@ Decision Engine::tick(Frame f, SceneProvider const &provider) {
             m_desired[a.player - 1] = a.down;
         }
     }
-    if (m_mode == Mode::Searching && m_tick >= m_candidate.guideFrom)
-        m_desired = m_brain.choose(f, m_edges, m_candidate.policy, provider);
+    if (m_mode == Mode::Searching && m_tick >= m_candidate.guideFrom) {
+        if (!m_limits.nativeSearch)
+            m_desired = m_brain.choose(f, m_edges, m_candidate.policy, provider);
+        else if (m_nativeSearch.needsDecision(f)) {
+            if (m_nativeSearch.atLimit()) {
+                fail("Лимит решений/памяти поиска; лучший участок сохранён");
+                return d;
+            }
+            unsigned legal = 0;
+            for (unsigned mask = 0; mask < (f.independent ? 4u : 2u); ++mask) {
+                bool allowed = true;
+                for (int i = 0; i < (f.independent ? 2 : 1); ++i) {
+                    auto pacer = m_pacer[i];
+                    allowed = allowed && pacer.apply((mask >> i) & 1u, m_outer) == bool((mask >> i) & 1u);
+                }
+                if (allowed)
+                    legal |= 1u << mask;
+            }
+            auto suggested = m_brain.choose(f, m_edges, m_candidate.policy, provider, 4096);
+            unsigned mask = unsigned(suggested[0]) | (f.independent ? unsigned(suggested[1]) << 1 : 0);
+            mask = m_nativeSearch.decide(f, m_trial.actions.size(), mask, legal);
+            m_desired = {bool(mask & 1), bool(mask & 2)};
+        }
+    }
     for (int i = 0; i < (f.independent ? 2 : 1); i++) {
         bool down = m_mode == Mode::Searching ? m_pacer[i].apply(m_desired[i], m_outer) : m_desired[i];
         if (down != m_held[i]) {
@@ -250,8 +287,23 @@ void Engine::service(double elapsed) {
     if (event == Event::Death) {
         remember();
         if (m_mode == Mode::Searching) {
-            m_search.observe(m_trial, m_candidate);
-            m_candidate = m_search.next();
+            if (m_limits.nativeSearch) {
+                std::optional<Candidate> next;
+                try {
+                    next = m_nativeSearch.backtrack(m_trial);
+                } catch (std::exception const &e) {
+                    fail(e.what());
+                    return;
+                }
+                if (!next) {
+                    fail("Доступные ветки на выбранном шаге исчерпаны; попробуйте шаг 1 или другой лимит");
+                    return;
+                }
+                m_candidate = std::move(*next);
+            } else {
+                m_search.observe(m_trial, m_candidate);
+                m_candidate = m_search.next();
+            }
             m_restart = true;
             m_release = true;
             m_save = true;
@@ -287,7 +339,14 @@ void Engine::service(double elapsed) {
 Session Engine::snapshot() const {
     if (!m_best)
         throw std::runtime_error("Нет записанного участка");
-    return {*m_best, m_search, m_candidate, m_brain.learning(), m_attempts, m_seconds};
+    Session s{*m_best, m_search, m_candidate, m_brain.learning(), m_attempts, m_seconds};
+    if (m_limits.nativeSearch) {
+        auto tree = m_nativeSearch;
+        if (!m_restart && m_trial.ticks && m_mode != Mode::Verifying && !m_trial.complete)
+            s.candidate = tree.resume(m_trial);
+        s.nativeSearch = std::move(tree);
+    }
+    return s;
 }
 Json encode(Session const &s) {
     return {{"format", "routefinder-v2-session"},
@@ -297,7 +356,8 @@ Json encode(Session const &s) {
             {"candidate", encodeCandidate(s.candidate)},
             {"learning", s.learning},
             {"attempts", s.attempts},
-            {"seconds", s.seconds}};
+            {"seconds", s.seconds},
+            {"native_search", s.nativeSearch ? s.nativeSearch->json() : Json()}};
 }
 Session decodeSession(Json const &j) {
     if (j.at("format") != "routefinder-v2-session" || j.at("schema") != 2)
@@ -309,6 +369,8 @@ Session decodeSession(Json const &j) {
         throw std::runtime_error("Некорректные лимиты сеанса");
     Session s{decode(j.at("best")), Search::restore(j.at("search")), decodeCandidate(j.at("candidate")),
               j.at("learning"),     attempts.get<std::uint64_t>(),   seconds};
+    if (j.contains("native_search") && !j.at("native_search").is_null())
+        s.nativeSearch = NativeSearch::restore(j.at("native_search"));
     Brain b;
     b.restoreLearning(s.learning);
     return s;

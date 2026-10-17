@@ -9,7 +9,7 @@
 namespace v2 {
 using Tick = std::uint64_t;
 using Json = nlohmann::json;
-inline constexpr char Version[] = "2.0.0";
+inline constexpr char Version[] = "2.1.0";
 inline constexpr Tick MaxTicks = 432000;
 struct Action {
     Tick tick = 0;
@@ -58,6 +58,10 @@ struct Run {
 struct Limits {
     std::uint64_t attempts = 10000;
     double seconds = 3600, attemptSeconds = 600;
+    bool nativeSearch = true;
+    unsigned decisionStep = 2;
+    std::size_t maxDepth = 32768;
+    std::uint64_t maxDecisions = 3000000;
 };
 bool sameSample(Sample const &a, Sample const &b);
 std::vector<Action> prefix(std::vector<Action> const &actions, Tick before);

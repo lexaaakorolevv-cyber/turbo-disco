@@ -124,6 +124,7 @@ void Native::prepare() {
     m_notice.clear();
     m_started = std::chrono::steady_clock::now();
     m_baseSeconds = 0;
+    m_nextSave = 0;
     m_cbs = m_layer->m_clickBetweenSteps;
     m_cos = m_layer->m_clickOnSteps;
     m_options = true;
@@ -134,7 +135,11 @@ Limits limits() {
     auto m = Mod::get();
     return {static_cast<std::uint64_t>(m->getSettingValue<int64_t>("max-attempts")),
             static_cast<double>(m->getSettingValue<int64_t>("max-seconds")),
-            static_cast<double>(m->getSettingValue<int64_t>("max-attempt-seconds"))};
+            static_cast<double>(m->getSettingValue<int64_t>("max-attempt-seconds")),
+            m->getSettingValue<bool>("native-search"),
+            static_cast<unsigned>(m->getSettingValue<int64_t>("decision-step")),
+            32768,
+            static_cast<std::uint64_t>(m->getSettingValue<int64_t>("max-decisions"))};
 }
 } // namespace
 void Native::search() {
@@ -148,7 +153,9 @@ void Native::search() {
                         (std::to_string(env["level"]["id"].get<int>()) + "_" +
                          env["level"]["data"].get<std::string>().substr(0, 16)) /
                         "search.json";
-            if (std::filesystem::exists(path) || std::filesystem::exists(path.string() + ".bak"))
+            auto backup = path;
+            backup += ".bak";
+            if (std::filesystem::exists(path) || std::filesystem::exists(backup))
                 try {
                     auto loaded = decodeSession(readJson(path));
                     if (loaded.best.environment == env) {
@@ -217,6 +224,8 @@ void Native::save() {
         if (!m_engine.best())
             throw std::runtime_error("Пока нет записанного участка");
         m_storage.submit(directory(), m_engine.snapshot());
+        m_nextSave = elapsed() + 3;
+        m_savePending = false;
         m_notice = m_engine.best()->verified ? "Проверенный макрос сохраняется"
                                              : "Сохраняется лучший участок; полного проверенного макроса нет";
     } catch (std::exception const &e) {
@@ -431,9 +440,13 @@ void Native::service() {
             m_options = false;
         }
     }
-    if (m_engine.consumeSave() && m_layer && m_engine.best())
+    m_savePending = m_engine.consumeSave() || m_savePending;
+    if (m_savePending && m_layer && m_engine.best() &&
+        (!active() || m_engine.mode() == Mode::Verifying || elapsed() >= m_nextSave))
         try {
             m_storage.submit(directory(), m_engine.snapshot());
+            m_nextSave = elapsed() + 3;
+            m_savePending = false;
         } catch (std::exception const &e) {
             m_notice = e.what();
         }

@@ -95,14 +95,28 @@ class $modify(RouteFinder2Game, GJBaseGameLayer) {
             return;
         }
         constexpr double step = 1. / 240;
-        n.accumulator() += std::min(static_cast<double>(dt), .1);
+        bool searching = n.engine().mode() == v2::Mode::Searching;
+        bool accelerate = searching && Mod::get()->getSettingValue<bool>("accelerate-search");
+        auto budget = std::chrono::milliseconds(Mod::get()->getSettingValue<int64_t>("search-budget-ms"));
+        auto deadline = std::chrono::steady_clock::now() + budget;
+        if (accelerate)
+            n.accumulator() = 0;
+        else
+            n.accumulator() += std::min(static_cast<double>(dt), .1);
         unsigned steps = 0;
-        while (n.accumulator() + 1e-9 >= step && steps++ < 24) {
-            n.accumulator() -= step;
+        // The budget changes only the number of fixed game steps per draw.
+        // It cannot change input timestamps, decision spacing or physics dt.
+        while (accelerate ? (steps < 128 && (steps == 0 || std::chrono::steady_clock::now() < deadline))
+                          : (n.accumulator() + 1e-9 >= step && steps < 24)) {
+            ++steps;
+            if (!accelerate)
+                n.accumulator() -= step;
             if (!n.outer())
                 break;
             GJBaseGameLayer::update(static_cast<float>(step));
             if (!n.active() || n.pending())
+                break;
+            if (searching && std::chrono::steady_clock::now() >= deadline)
                 break;
         }
         n.service();

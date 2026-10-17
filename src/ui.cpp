@@ -70,7 +70,7 @@ class Panel final : public Popup {
         title->setAnchorPoint({0, .5f});
         title->setPosition({24, 286});
         m_mainLayer->addChild(title);
-        auto version = text("Новая архитектура · 2.0.0", 9);
+        auto version = text("Физика игры · 2.1.0", 9);
         version->setColor(Muted);
         version->setAnchorPoint({1, .5f});
         version->setPosition({436, 287});

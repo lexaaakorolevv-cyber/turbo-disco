@@ -31,7 +31,8 @@ int main() {
         Session session{run, Search{}, Candidate{}, Brain{}.learning(), 1, 3};
         auto restored = decodeSession(encode(session));
         check(encode(restored) == encode(session), "Session roundtrip changed state");
-        auto dir = std::filesystem::temp_directory_path() / "routefinder-v2-storage-tests";
+        auto dir = std::filesystem::temp_directory_path() /
+                   std::filesystem::path(u8"routefinder-v2-сохранения-тест");
         std::filesystem::remove_all(dir);
         {
             Storage storage;
@@ -46,7 +47,9 @@ int main() {
             check(!std::filesystem::exists(dir / "macro.json"), "Unverified macro published as successful");
         }
         auto path = dir / "best.json";
-        std::filesystem::rename(path, path.string() + ".bak");
+        auto backup = path;
+        backup += ".bak";
+        std::filesystem::rename(path, backup);
         check(decode(readJson(path)).actions == run.actions, "Backup recovery failed");
         std::filesystem::remove_all(dir);
         std::cout << "Macro/session JSON validation, untrusted completion flag, background coalescing and "

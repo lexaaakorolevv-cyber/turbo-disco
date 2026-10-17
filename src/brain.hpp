@@ -17,7 +17,7 @@ class Brain {
   public:
     void resetAttempt();
     std::array<bool, 2> choose(Frame frame, std::array<std::uint64_t, 2> edges, std::uint64_t policy,
-                               SceneProvider const &scene);
+                               SceneProvider const &scene, unsigned nodeBudget = 0);
     Json learning() const;
     void restoreLearning(Json const &value);
 };
