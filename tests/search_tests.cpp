@@ -1,89 +1,109 @@
-#include "core.hpp"
-#include "input.hpp"
-#include <algorithm>
+#include "search.hpp"
 #include <iostream>
 #include <stdexcept>
-
-using namespace rf;
-namespace {
-void check(bool ok, char const* message) { if (!ok) throw std::runtime_error(message); }
-struct Result { Tick death; double percent; };
-// Independent timing-gate oracle. The first two gates form a successful
-// prefix; the third requires both a precise press and a precise hold length.
-// This tests local optimization of an existing near-miss, not GD physics.
-Result evaluate(std::vector<Action> const& actions) {
-    struct Gate { Tick press, hold; };
-    int cleared = 0;
-    for (auto gate : {Gate{20, 20}, Gate{100, 24}, Gate{200, 24}}) {
-        bool safe = false;
-        for (std::size_t i = 0; i + 1 < actions.size(); ++i)
-            if (actions[i].down && !actions[i+1].down && actions[i].tick >= gate.press - 1 &&
-                actions[i].tick <= gate.press + 1 && actions[i+1].tick - actions[i].tick == gate.hold) safe = true;
-        if (!safe) return {gate.press + 60, cleared * 30.};
-        ++cleared;
-    }
-    return {420, 100};
+using namespace v2;
+void check(bool ok, char const *why) {
+    if (!ok)
+        throw std::runtime_error(why);
 }
-void validateActions(std::vector<Action> const& actions) {
-    bool held = false;
-    Tick previous = 0;
-    for (std::size_t i = 0; i < actions.size(); ++i) {
-        check(actions[i].tick < 500 && (!i || actions[i].tick > previous), "Mutation reordered / overlapped actions");
-        check(actions[i].down != held, "Mutation introduced a redundant transition");
-        previous = actions[i].tick; held = actions[i].down;
-    }
-}
+Run run(std::vector<Action> actions, Tick tick, double percent) {
+    Run r;
+    r.actions = std::move(actions);
+    r.ticks = tick;
+    r.percent = percent;
+    return r;
 }
 int main() {
     try {
-        int total = 0, worst = 0;
-        for (int seed : {1337, 42, 7, 2026}) for (int error : {-16, -8, -4, -2, 2, 4, 8, 16}) {
-            Search search(seed, 120), repeated(seed, 120);
-            std::vector<Action> parent{{20,true},{40,false},{100,true},{124,false},
-                {static_cast<Tick>(200 + error),true},{static_cast<Tick>(224 + error),false}};
-            search.next(500); repeated.next(500);
-            auto initial = evaluate(parent);
-            search.observe(parent, initial.death, initial.percent);
-            repeated.observe(parent, initial.death, initial.percent);
-            bool solved = false;
-            for (int attempt = 1; attempt <= 64; ++attempt) {
-                auto plan = search.next(500);
-                check(plan == repeated.next(500), "Focused search is not seed reproducible");
-                validateActions(plan);
-                auto result = evaluate(plan);
-                if (result.percent == 100) {
-                    check(prefix(plan, 160) == prefix(parent, 160), "Successful prefix was lost");
-                    // In this oracle ticks are outer physics steps. Ensure the
-                    // winning macro really survives the live 16 CPS gate.
-                    InputPacer pacer; pacer.reset(SearchCps);
-                    bool held = false; std::size_t cursor = 0;
-                    std::vector<Action> actual;
-                    for (Tick t = 0; t < result.death; ++t) {
-                        if (cursor < plan.size() && plan[cursor].tick == t) held = plan[cursor++].down;
-                        bool down = pacer.apply(held, t);
-                        if (actual.empty() ? down : down != actual.back().down) appendAction(actual,t,down);
-                    }
-                    check(evaluate(actual).percent == 100, "Focused winner requires more than 16 CPS");
-                    total += attempt; worst = std::max(worst, attempt); solved = true; break;
-                }
-                search.observe(plan,result.death,result.percent);
-                repeated.observe(plan,result.death,result.percent);
-                check(search.size() <= Search::ArchiveLimit, "Archive grew without a limit");
+        Search s;
+        auto viable = run({{300, true}, {320, false}, {422, true}, {446, false}}, 480, 35);
+        auto trap = run({{20, true}, {40, false}, {700, true}, {720, false}}, 800, 75);
+        s.observe(viable, {});
+        s.observe(trap, {});
+        auto candidate = s.next();
+        bool lower = false;
+        for (int i = 0; i < 20; i++) {
+            if (candidate.parent == 1)
+                lower = true;
+            s.observe(candidate.parent == 1 ? viable : trap, candidate);
+            candidate = s.next();
+        }
+        check(lower, "Higher percent starved an earlier branch");
+        auto encoded = s.json();
+        auto resumed = Search::restore(encoded);
+        for (int i = 0; i < 64; i++) {
+            auto a = s.next(), b = resumed.next();
+            check(encodeCandidate(a) == encodeCandidate(b), "Resumed scheduler changed candidate");
+            s.observe(a.parent == 1 ? viable : trap, a);
+            resumed.observe(b.parent == 1 ? viable : trap, b);
+        }
+        Search timing;
+        auto parent =
+            run({{20, true}, {40, false}, {100, true}, {124, false}, {202, true}, {226, false}}, 280, 60);
+        timing.observe(parent, {});
+        bool repaired = false;
+        for (int i = 0; i < 96; i++) {
+            auto c = timing.next(500);
+            check(validActions(c.actions, 500), "Repair made invalid transitions");
+            if (c.actions.size() == 6 && c.actions[4].tick == 200 && c.actions[5].tick == 224) {
+                check(prefix(c.actions, 160) == prefix(parent.actions, 160),
+                      "Repair changed successful prefix");
+                repaired = true;
+                break;
             }
-            check(solved,"Focused search failed to repair a near-miss");
         }
-        Search open(1337,120);
-        open.next(500);
-        std::vector<Action> held{{100,true}};
-        open.observe(held,200,30,true);
-        bool foundRelease = false;
-        for(int i=0;i<32;++i){ auto plan=open.next(500); validateActions(plan);
-            if(plan.size()==2 && plan.front()==held.front() && !plan.back().down && plan.back().tick==192) foundRelease=true;
+        check(repaired, "Near-miss repair not explored");
+        Search independent;
+        auto dual = run({{10, true, 1, 1},
+                         {11, true, 1, 2},
+                         {20, false, 1, 1},
+                         {25, false, 1, 2},
+                         {50, true, 1, 1},
+                         {60, false, 1, 1}},
+                        90, 30);
+        independent.observe(dual, {});
+        auto channel = [](std::vector<Action> const &all, int player) {
+            std::vector<Action> out;
+            for (auto a : all)
+                if (a.player == player)
+                    out.push_back(a);
+            return out;
+        };
+        unsigned checked = 0;
+        for (int i = 0; i < 96; i++) {
+            auto c = independent.next(200);
+            if (c.guideFrom <= 90)
+                continue;
+            bool first = channel(c.actions, 1) != channel(dual.actions, 1),
+                 second = channel(c.actions, 2) != channel(dual.actions, 2);
+            check(!(first && second), "Local repair edited both player channels");
+            ++checked;
         }
-        check(foundRelease,"No release variation for a fatal sustained hold");
-        auto tiny = open.next(1);
-        check(std::all_of(tiny.begin(),tiny.end(),[](auto const& a){return a.tick<1;}) && open.next(0).empty(),"Narrow horizon corrupted a focused mutation");
-        std::cout << "32 near-miss repairs: total attempts=" << total << ", worst=" << worst
-            << "; prefix, 16 CPS, sustained-hold release, bounds and reproducibility: PASS\n";
-    } catch(std::exception const& e){std::cerr<<e.what()<<'\n';return 1;}
+        check(checked > 10, "Independent repair variants missing");
+        Search points;
+        Sample sample;
+        sample.tick = 32;
+        auto actions = std::vector<Action>{{10, true}, {20, false}};
+        points.checkpoint(10, sample, actions, 1);
+        points.checkpoint(10, sample, actions, 1);
+        check(points.json()["points"][0][3] == 1, "One run confirmed a point twice");
+        points.checkpoint(10, sample, actions, 2);
+        check(points.json()["points"][0][3] == 2, "Repeated native point not confirmed");
+        points.invalidate(32);
+        check(points.json()["points"].empty(), "Desynchronized point remained available");
+        auto bad = encoded;
+        bad["branches"][0][3] = -1;
+        bool rejected = false;
+        try {
+            Search::restore(bad);
+        } catch (...) {
+            rejected = true;
+        }
+        check(rejected, "Invalid scheduler counters accepted");
+        std::cout << "Branch fairness, local repair, checkpoint confirmation/invalidation and exact "
+                     "scheduler resume PASS\n";
+    } catch (std::exception const &e) {
+        std::cerr << e.what() << '\n';
+        return 1;
+    }
 }

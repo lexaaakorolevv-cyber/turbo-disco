@@ -1,76 +1,214 @@
-#include "core.hpp"
-#include "intelligence.hpp"
-#include "planner.hpp"
-#include <cmath>
+#include "test_world.hpp"
 #include <iostream>
-#include <stdexcept>
-using namespace rf;
+using namespace v2;
 namespace {
-void check(bool ok,char const* message){if(!ok)throw std::runtime_error(message);}
-std::vector<Action> channel(std::vector<Action> const&all,int player){std::vector<Action> result;for(auto a:all)if(a.player==player)result.push_back(a);return result;}
-void physics(){
-    Calibration ufo;
-    for(int i=0;i<16;i++){
-        ufo.resetSampling();FormState a;a.form=Form::Ufo;a.grounded=false;a.vy=.05;a.y=200;
-        auto b=a;b.x+=a.vx*.25;b.vy=-.075;
-        ufo.observe({a,0,0});ufo.observe({b,.25,0});
+void recordReplay() {
+    auto macro = recorded();
+    check(macro.actions ==
+              std::vector<Action>{{2, true, 1, 1}, {5, true, 1, 2}, {8, false, 1, 1}, {20, false, 1, 2}},
+          "Independent recorded inputs changed");
+    validate(macro);
+    Engine e;
+    e.startReplay(environment(), {4, 100, 10}, macro);
+    e.beginAttempt();
+    World w;
+    std::vector<Action> actual;
+    for (unsigned t = 0; t < 64; t++) {
+        check(e.advanceOuter(), "Replay outer failed");
+        auto d = e.tick(w.frame(t), [](auto const &) -> Scene const & {
+            throw std::runtime_error("Replay called the planner");
+        });
+        check(d.advance, "Replay desynchronized");
+        actual.insert(actual.end(), d.actions.begin(), d.actions.end());
+        w.apply(d.actions);
+        w.step();
     }
-    FormState probe;probe.form=Form::Ufo;
-    check(ufo.samples()==0&&ufo.adjusted(probe).gravity==probe.gravity,"UFO apex contaminated gravity calibration");
-    Calibration pad;
-    for(int i=0;i<16;i++){
-        pad.resetSampling();FormState a;auto b=a;b.x+=a.vx*.25;b.grounded=false;b.held=true;b.padContact=true;b.vy=10.2;
-        pad.observe({a,0,0});pad.observe({b,.25,1});
+    check(actual == macro.actions, "Replay input differs");
+    e.advanceOuter();
+    auto d = e.tick(w.frame(64), {});
+    check(!d.advance && !e.active(), "Incomplete replay continued beyond its end");
+    Engine bad;
+    bad.startReplay(environment(), {4, 100, 10}, macro);
+    bad.beginAttempt();
+    World wrong;
+    for (unsigned t = 0; t < 32 && bad.active(); t++) {
+        bad.advanceOuter();
+        auto f = wrong.frame(t);
+        if (t == 16)
+            f.players[1].y += 1;
+        auto result = bad.tick(f, {});
+        wrong.apply(result.actions);
+        wrong.step();
     }
-    check(pad.samples()==0,"Pad impulse learned as a normal jump");
-    FormState normal,mini=normal;mini.scale=.6;mini.halfWidth=mini.halfHeight=8.4;
-    check(!equivalentFormStates(normal,mini),"Mini route merged with full-size route");
-    auto speed=normal;speed.vx=7.8;check(!equivalentFormStates(normal,speed),"Different speed routes merged");
-    auto gravity=normal;gravity.gravityMod=2;check(!equivalentFormStates(normal,gravity),"Different gravity routes merged");
-    FormState falling;falling.y=650;falling.grounded=false;falling.vy=0;
-    auto landing=chooseFormInput(falling,{}, {},nullptr,0,true);
-    check(landing.survival>42&&landing.survival<=66&&std::abs(landing.forecast.path.back().y-105)<.01,"Forecast stopped before checking landing");
-    auto walking=chooseFormInput(normal,{}, {},nullptr,0,false);
-    check(walking.survival==42&&!walking.down,"Safe walking needlessly extended or jumped");
+    check(!bad.active() && bad.status().find("Расхождение") != std::string::npos,
+          "Second-player desync accepted");
 }
-void independentEdits(){
-    std::vector<Action> parent{{10,true,1,1},{11,true,1,2},{20,false,1,1},{25,false,1,2},{50,true,1,1},{60,false,1,1}};
-    Search search(1337,120,true);search.observe(parent,90,30,true);search.preferPlayer(1);unsigned tested=0;bool repaired=false;
-    for(unsigned i=0;i<128;i++){
-        auto next=search.next(200);check(expandPlan(compactPlan(next),200)==next,"Focused channel edit lost event ordering");
-        if(search.phase()!=SearchPhase::Timing)continue;
-        bool first=channel(next,1)!=channel(parent,1),second=channel(next,2)!=channel(parent,2);
-        check(!(first&&second),"P1 timing repair moved P2 input");++tested;auto p1=channel(next,1);
-        if(!second&&p1.size()==4&&p1[0].tick==9&&p1[1].tick==19&&p1[2].tick==50&&p1[3].tick==60)repaired=true;
+void verification() {
+    Engine e;
+    e.startRecording(environment(), {2, 100, 10});
+    e.beginAttempt();
+    World w;
+    for (unsigned t = 0; t < 32; t++) {
+        if (t == 2)
+            e.human(1, true);
+        if (t == 10)
+            e.human(1, false);
+        e.advanceOuter();
+        auto d = e.tick(w.frame(t, false), {});
+        w.apply(d.actions);
+        w.step();
     }
-    check(tested>=20&&repaired,"Isolated paired timing repair was not explored");
-}
-void checkpoints(){
-    Search search(42,120,true);std::vector<Action> actions{{10,true,1,1},{12,true,1,2},{20,false,1,1},{25,false,1,2},{50,true,1,1},{60,false,1,1}};
-    Sample state{32,100,105,0,1,1,.25,1u<<12};state.second=PlayerSample{100,437,0,1,1,2};
-    search.observeCheckpoint(10,actions,state,1);search.observeCheckpoint(10,actions,state,1);
-    check(search.checkpointCount()==0,"One attempt falsely confirmed a checkpoint");
-    auto changed=state;changed.second->y+=1;search.observeCheckpoint(10,actions,changed,2);
-    check(search.checkpointCount()==0,"Different P2 endpoint confirmed a checkpoint");
-    search.observeCheckpoint(10,actions,state,3);search.observeCheckpoint(10,actions,state,4);
-    check(search.checkpointCount()==1,"Repeated native endpoint did not confirm");
-    for(int i=0;i<12;i++)search.observe(actions,90,30);
-    bool rolled=false;
-    for(int i=0;i<8;i++){
-        auto next=search.next(200);if(!search.rollbackState())continue;
-        check(next==prefix(actions,state.tick)&&search.guidanceFrom()==state.tick&&sameSample(state,*search.rollbackState()),"Rollback did not retain exact replay prefix and endpoint");
-        check(search.rollbackPercent()==10,"Wrong rollback milestone");rolled=true;break;
+    e.markComplete();
+    check(!e.restartRequested(), "Completion changed world inside the physics callback");
+    e.service(1);
+    check(e.mode() == Mode::Verifying && e.restartRequested() && !e.consumeCompletion(),
+          "Unverified success reached native completion");
+    e.beginAttempt();
+    w = World{};
+    for (unsigned t = 0; t < 32; t++) {
+        e.advanceOuter();
+        auto d = e.tick(w.frame(t, false), {});
+        check(d.advance, "Verification desynchronized");
+        w.apply(d.actions);
+        w.step();
     }
-    check(rolled,"Stagnation did not roll back to a confirmed checkpoint");
-    auto saved=search.snapshot();auto restored=Search::restore(saved);
-    check(restored.rollbackState()&&sameSample(*restored.rollbackState(),state),"Pending rollback endpoint lost on resume");
-    for(int i=0;i<32;i++)check(search.next(200)==restored.next(200),"Checkpoint search resume diverged");
-    search.invalidateCheckpoint(state.tick);check(search.checkpointCount()==0&&!search.rollbackState(),"Desynchronized checkpoint remained usable");
-    auto malformed=saved;malformed["checkpoints"][0]["confirmations"]=3;bool rejected=false;
-    try{Search::restore(malformed);}catch(...){rejected=true;}check(rejected,"Untrusted checkpoint confirmation accepted");
-    malformed=saved;malformed["checkpoints"][0]["state"][8]=nullptr;rejected=false;
-    try{Search::restore(malformed);}catch(...){rejected=true;}check(rejected,"Checkpoint lost required second-player state");
+    e.markComplete();
+    e.service(2);
+    check(e.best()->verified && e.best()->complete && e.consumeCompletion() && !e.active(),
+          "Full verification was not required/accepted");
 }
+void emptyPlanningAndLimits() {
+    Engine e;
+    e.startSearch(environment(), {2, 100, 10});
+    e.beginAttempt();
+    Scene scene;
+    World w;
+    unsigned calls = 0;
+    for (unsigned t = 0; t < 96; t++) {
+        e.advanceOuter();
+        auto d = e.tick(w.frame(0, false), [&](auto const &) -> Scene const & {
+            ++calls;
+            return scene;
+        });
+        check(d.advance && d.actions.empty(), "Empty-ground controller jumped or stopped");
+        w.apply(d.actions);
+        w.step();
+    }
+    check(calls <= 10 && calls >= 2, "Short input plan did not reduce redundant scene/forecast calls");
+    e.markDeath();
+    check(!e.restartRequested(), "Death restarted inside native callback");
+    e.service(1);
+    check(e.restartRequested(), "Deferred death was not handled");
+    e.beginAttempt();
+    check(!e.held(1) && e.tickNumber() == 0 && e.outer() == 0, "Attempt did not reset input/clock");
+    e.markDeath();
+    e.service(2);
+    e.beginAttempt();
+    check(!e.active() && e.attempts() == 2, "Attempt limit ignored");
+    Engine timed;
+    timed.startSearch(environment(), {2, 1, 10});
+    timed.beginAttempt();
+    timed.service(1);
+    check(!timed.active(), "Wall time limit ignored");
 }
-int main(){try{physics();independentEdits();checkpoints();std::cout<<"Calibration guards, distinct physics routes, landing continuation, isolated P1/P2 edits and confirmed replay checkpoints: PASS\n";}
-catch(std::exception const&e){std::cerr<<e.what()<<'\n';return 1;}}
+void cps() {
+    auto draft = recorded();
+    draft.complete = false;
+    Search s;
+    Candidate c;
+    c.guideFrom = 2000;
+    for (Tick t = 0; t < 960; t++)
+        for (int p = 1; p <= 2; p++)
+            c.actions.push_back({t, t % 2 == 0, 1, p});
+    Session resume{draft, s, c, Brain{}.learning(), 0, 0};
+    Engine e;
+    e.startSearch(environment(), {4, 100, 10}, resume);
+    e.beginAttempt();
+    World w;
+    std::array<std::vector<Tick>, 2> presses;
+    for (unsigned outer = 0; outer < 480; outer++) {
+        e.advanceOuter();
+        for (unsigned part = 0; part < 2; part++) {
+            auto frame = w.frame(0);
+            frame.timing = {.125, part == 0, part == 1};
+            auto d = e.tick(frame, {});
+            for (auto const &action : d.actions)
+                if (action.down)
+                    presses[action.player - 1].push_back(outer);
+            w.apply(d.actions);
+            w.step(.125);
+        }
+    }
+    for (auto const &list : presses) {
+        check(list.size() >= 20, "CPS test produced no useful input");
+        for (auto t : list) {
+            unsigned count = 0;
+            for (auto x : list)
+                if (x >= t && x < t + 240)
+                    ++count;
+            check(count <= 16, "Search exceeded rolling 16 CPS on one player");
+        }
+    }
+}
+void halfTickReplay() {
+    Engine e;
+    e.startRecording(environment(), {4, 100, 10});
+    e.beginAttempt();
+    World w;
+    for (unsigned outer = 0; outer < 20; outer++) {
+        e.advanceOuter();
+        for (unsigned part = 0; part < 2; part++) {
+            auto tick = outer * 2 + part;
+            if (tick == 3)
+                e.human(1, true);
+            if (tick == 9)
+                e.human(1, false);
+            auto frame = w.frame(tick);
+            frame.timing = {.125, part == 0, part == 1};
+            auto d = e.tick(frame, {});
+            w.apply(d.actions);
+            w.step(.125);
+        }
+    }
+    e.stop();
+    auto run = *e.best();
+    validate(run);
+    check(run.ticks == 40 && run.outer == 20, "Half ticks changed outer clock");
+    Engine replay;
+    replay.startReplay(environment(), {4, 100, 10}, run);
+    replay.beginAttempt();
+    w = World{};
+    for (unsigned outer = 0; outer < 20; outer++) {
+        replay.advanceOuter();
+        for (unsigned part = 0; part < 2; part++) {
+            auto frame = w.frame(outer * 2 + part);
+            frame.timing = {.125, part == 0, part == 1};
+            auto d = replay.tick(frame, {});
+            check(d.advance, "Exact half-tick replay failed");
+            w.apply(d.actions);
+            w.step(.125);
+        }
+    }
+    Engine mismatch;
+    mismatch.startReplay(environment(), {4, 100, 10}, run);
+    mismatch.beginAttempt();
+    mismatch.advanceOuter();
+    auto wrong = World{}.frame(0);
+    check(!mismatch.tick(wrong, {}).advance && !mismatch.active(),
+          "Different native timing pattern accepted");
+}
+} // namespace
+int main() {
+    try {
+        recordReplay();
+        verification();
+        emptyPlanningAndLimits();
+        cps();
+        halfTickReplay();
+        std::cout << "Native-boundary protocol: recording, exact P1/P2 replay, desync, full verification, "
+                     "deferred reset, planning cache, input reset and limits PASS\n";
+    } catch (std::exception const &e) {
+        std::cerr << e.what() << '\n';
+        return 1;
+    }
+}

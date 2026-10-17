@@ -1,61 +1,15 @@
 {
-    "geode": "5.11.1",
-    "gd": {
-        "win": "2.2081",
-        "android": "2.2081"
-    },
-    "id": "local.routefinder",
-    "name": "Route Finder",
-    "version": "v1.14.0",
-    "developer": "Route Finder contributors",
-    "description": "Analyze level structure and corridors, then search solo/two-player routes; pause-only controls and verified physics-tick macros.",
-    "settings": {
-        "max-attempts": {
-            "type": "int",
-            "name": "Attempt limit (includes verification)",
-            "default": 10000,
-            "min": 2,
-            "max": 100000
-        },
-        "max-seconds": {
-            "type": "int",
-            "name": "Wall time limit (seconds)",
-            "default": 3600,
-            "min": 10,
-            "max": 86400
-        },
-        "max-attempt-seconds": {
-            "type": "int",
-            "name": "Per-attempt simulation limit (seconds)",
-            "default": 600,
-            "min": 10,
-            "max": 1800
-        },
-        "mutation-window": {
-            "type": "int",
-            "name": "Mutation window (physics ticks)",
-            "default": 120,
-            "min": 8,
-            "max": 2400
-        },
-        "search-seed": {
-            "type": "int",
-            "name": "Search seed",
-            "default": 1337,
-            "min": 1,
-            "max": 2147483647
-        },
-        "auto-resume": {
-            "type": "bool",
-            "name": "Resume saved search",
-            "description": "Find route restores this level search session when compatible. Disable to start a fresh search. Every attempt still starts from the beginning.",
-            "default": true
-        },
-        "smooth-search": {
-            "type": "bool",
-            "name": "Lower search load",
-            "description": "Reuse unchanged physics-step decisions and short action plans. Every new forecast completes its full horizon; no render-frame timeout or skipped input. Heavy scenes can still take longer.",
-            "default": true
-        }
-    }
+ "geode":"5.11.1",
+ "gd":{"win":"2.2081"},
+ "id":"local.routefinder",
+ "name":"Route Finder 2",
+ "version":"v2.0.0",
+ "developer":"Route Finder contributors",
+ "description":"Modular native-tick recording, verified replay and bounded route search. Controls in pause; best percent only in the level.",
+ "settings":{
+  "max-attempts":{"type":"int","name":"Attempt limit (includes full verification)","default":10000,"min":2,"max":100000},
+  "max-seconds":{"type":"int","name":"Total wall time limit (seconds)","default":3600,"min":10,"max":86400},
+  "max-attempt-seconds":{"type":"int","name":"Single attempt duration limit","default":600,"min":10,"max":1800},
+  "auto-resume":{"type":"bool","name":"Resume compatible v2 search session","default":true}
+ }
 }
