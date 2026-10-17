@@ -1,8 +1,6 @@
 name: Build Windows x64
 
 on:
-  push:
-    branches: [codex/cube-learner-windows]
   pull_request:
     branches: [main]
   workflow_dispatch:

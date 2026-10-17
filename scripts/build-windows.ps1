@@ -1,11 +1,22 @@
 param(
     [ValidateSet('Release', 'Debug')][string]$Configuration = 'Release',
-    [string]$Generator = 'Visual Studio 17 2022',
+    [string]$Generator = '',
     [switch]$SkipTests
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if ($env:OS -ne 'Windows_NT') { throw 'Run this script on Windows x64.' }
+if (-not $Generator) {
+    $VsWhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+    if (-not (Test-Path $VsWhere)) { throw 'Visual Studio Installer/vswhere was not found.' }
+    $VsVersion = (& $VsWhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationVersion).Trim()
+    if (-not $VsVersion) { throw 'Install Visual Studio with Desktop development with C++.' }
+    $VsMajor = [int]($VsVersion.Split('.')[0])
+    if ($VsMajor -eq 18) { $Generator = 'Visual Studio 18 2026' }
+    elseif ($VsMajor -eq 17) { $Generator = 'Visual Studio 17 2022' }
+    else { throw "Unsupported Visual Studio version: $VsVersion. Specify -Generator explicitly." }
+    Write-Host "Using $Generator ($VsVersion)"
+}
 
 function Invoke-Checked {
     param([string]$Program, [string[]]$Arguments)

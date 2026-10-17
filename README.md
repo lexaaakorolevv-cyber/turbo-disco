@@ -51,7 +51,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1
 `7407717c307d1cd94461786210b330ab868f4260`, скачивает официальный Geode.lib
 и CLI 3.9.0, собирает DLL и проверяет содержимое `.geode`.
 Результат: `build/windows-x64/local.cube_learner.geode`.
-Если установлен другой совместимый генератор Visual Studio, передайте
+Скрипт автоматически выбирает установленную Visual Studio 2022 или 2026.
+Для явного выбора генератора передайте
 `-Generator "Visual Studio 18 2026"` с его точным CMake-именем.
 
 Существующие SDK и bindings можно указать через `GEODE_SDK` и
