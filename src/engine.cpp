@@ -260,6 +260,14 @@ void Engine::remember() {
     }
 }
 void Engine::fail(std::string reason) {
+    // tick() can fail after sampling but before a native step is committed.
+    // Never publish that speculative sample/timing as part of a valid run.
+    if (m_trial.timings.size() > m_tick)
+        m_trial.timings.resize(m_tick);
+    while (!m_trial.trace.empty() && m_trial.trace.back().tick >= m_tick)
+        m_trial.trace.pop_back();
+    while (!m_trial.actions.empty() && m_trial.actions.back().tick >= m_tick)
+        m_trial.actions.pop_back();
     m_status = std::move(reason);
     remember();
     m_mode = Mode::Idle;

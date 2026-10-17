@@ -128,6 +128,27 @@ void limitedAndPaced() {
     r.ticks = 2;
     check(!paced.backtrack(r), "CPS-blocked alternative entered frontier");
 }
+void limitSavesValidRun() {
+    Engine e;
+    Limits limits{100, 100, 10};
+    limits.decisionStep = 1;
+    limits.maxDepth = 64;
+    e.startSearch(environment(), limits);
+    e.beginAttempt();
+    World w;
+    Scene empty;
+    for (unsigned t = 0; t < 65; ++t) {
+        e.advanceOuter();
+        auto d = e.tick(w.frame(t, false), [&](auto const &) -> Scene const & { return empty; });
+        w.apply(d.actions);
+        if (d.advance)
+            w.step();
+    }
+    check(!e.active() && e.best().has_value(), "Memory limit did not stop/save");
+    validate(*e.best());
+    auto session = decodeSession(encode(e.snapshot()));
+    check(session.best.ticks == 64, "Unexecuted limit tick entered the saved run");
+}
 void sessionResume() {
     Engine e;
     e.startSearch(environment(), {100, 100, 10});
@@ -221,6 +242,7 @@ int main() {
         witnessesAndResume();
         widenedRollback();
         limitedAndPaced();
+        limitSavesValidRun();
         sessionResume();
         engineFindsNativeSolution();
         std::cout << "Native input tree: joint masks, exact replay witnesses, resume, dead-end widening, "
